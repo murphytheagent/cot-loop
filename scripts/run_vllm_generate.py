@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate AIME responses with vLLM for Figure 1 reproduction.
+"""Generate rollout data with vLLM for loop detector analysis.
 
 Examples (sbatch)
   # QwQ-32B (TP=8, 8 GPUs)

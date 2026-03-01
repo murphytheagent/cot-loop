@@ -1,8 +1,12 @@
-AIME 2024/2025 dataset for Figure 1
+# Data Layout
 
-Expected file: `data/aime_2024_2025.jsonl`
+## Default Benchmark File
 
-Format (one JSON object per line):
+`data/aime_2024_2025.jsonl` remains the default local corpus for quick experiments and script defaults.
+
+## Expected Record Format (Per Line JSON)
+
+```json
 {
   "id": "AIME24I-1",
   "year": 2024,
@@ -11,14 +15,14 @@ Format (one JSON object per line):
   "question": "Full problem statement text",
   "answer": "Final answer (string)"
 }
-
-You need all 60 problems:
-- AIME 2024 I (15)
-- AIME 2024 II (15)
-- AIME 2025 I (15)
-- AIME 2025 II (15)
+```
 
 Notes:
-- Use the exact official problem statements.
-- Answers are required for math-verify grading.
-- Keep only the question text in `question` (no solution).
+- `question` is used as the prompt text.
+- `answer` is required whenever you want correctness grading and loop analysis with ground truth.
+
+## Custom Local JSONL Datasets
+
+For non-default JSONL files, include the prompt field referenced by `--prompt-field` in `scripts/build_probe_dataset.py`.
+
+To keep backward compatibility with existing command defaults, local datasets that do not use `question` should be paired with an explicit `--prompt-field` and `--test-dataset` when used with defaults.

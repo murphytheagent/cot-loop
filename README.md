@@ -99,7 +99,7 @@ Default dataset/model settings in this job:
 - `PROBE_PRESET=mlp`
 
 Prompt formatting note:
-- Probe dataset build and AIME eval both use the same chat prompt constructor: `scripts/utils.py:build_prompt()`.
+- Probe dataset build and generation/eval scripts share the same chat prompt constructor: `scripts/utils.py:build_prompt()`.
 
 ## Model Presets
 
@@ -216,7 +216,8 @@ The training script automatically applies `pos_weight` in BCEWithLogitsLoss base
 
 ## Additional Scripts
 
-For loop detection analysis on existing generations and reproducing Figure 1 from the paper, see the `scripts/` directory.
+For rollout-loop analysis on existing generations, see the `scripts/` directory.  
+The Figure 1 plotting and generation scripts remain for archival comparisons and are not the primary detector training path.
 
 ## Technical Details
 

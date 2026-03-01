@@ -441,7 +441,7 @@ def main() -> None:
         trust_remote_code=rollout_cfg.trust_remote_code,
     )
 
-    # Use the same chat prompt construction as AIME eval scripts (single source of truth).
+    # Use a shared chat-prompt construction path across detector builders and eval scripts.
     train_records = _apply_chat_prompt(tokenizer, train_records, num_repetition=1)
     test_records = _apply_chat_prompt(tokenizer, test_records, num_repetition=1)
 

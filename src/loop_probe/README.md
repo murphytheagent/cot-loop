@@ -1,14 +1,14 @@
 # loop_probe
 
 Purpose
-- Build a binary probe dataset from LLM runs where:
+- Build a binary probe dataset from LLM runs to train a CoT loop detector:
   - input feature = last-token activation at last layer during prefill
   - target label = whether a rollout trajectory loops (`has_ngram_loop`)
 - Train a probe classifier (linear or MLP) on those features.
 
 High-level flow
 1. Load Hugging Face dataset rows and read prompt text from `--prompt-field`.
-2. Build model-formatted chat prompts with `utils.build_prompt` (shared with AIME eval).
+2. Build model-formatted chat prompts with `utils.build_prompt` (shared by data builders and analysis scripts).
 3. Build train/test splits:
    - separate train/test dataset specs, or
    - identical train/test specs split deterministically with `--split-ratio`.
