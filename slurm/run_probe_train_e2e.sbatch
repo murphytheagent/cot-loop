@@ -85,6 +85,8 @@ DATASET_SEED="${DATASET_SEED:-}"
 MAX_NUM_SEQS="${MAX_NUM_SEQS:-}"
 MAX_TOKENS="${MAX_TOKENS:-}"
 PREFILL_BATCH_SIZE="${PREFILL_BATCH_SIZE:-32}"
+FEATURE_POOLING="${FEATURE_POOLING:-last_token}"
+FEATURE_LAYER="${FEATURE_LAYER:--1}"
 
 LOOP_N="${LOOP_N:-30}"
 LOOP_K="${LOOP_K:-10}"
@@ -128,6 +130,7 @@ fi
 
 echo "[probe-e2e] model_preset=${MODEL_PRESET} train=${TRAIN_DATASET}:${TRAIN_SPLIT} test=${TEST_DATASET}:${TEST_SPLIT}"
 echo "[probe-e2e] probe_preset=${PROBE_PRESET}"
+echo "[probe-e2e] feature_pooling=${FEATURE_POOLING} feature_layer=${FEATURE_LAYER}"
 echo "[probe-e2e] resolved seeds: ${SEED_LIST[*]}"
 
 BUILD_ARGS=(
@@ -140,6 +143,8 @@ BUILD_ARGS=(
   --loop-k "${LOOP_K}"
   --shard-size "${SHARD_SIZE}"
   --prefill-batch-size "${PREFILL_BATCH_SIZE}"
+  --feature-pooling "${FEATURE_POOLING}"
+  --feature-layer "${FEATURE_LAYER}"
   --out-dir "${OUT_DATA_DIR}"
 )
 

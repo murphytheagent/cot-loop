@@ -8,7 +8,7 @@ The core hypothesis: Can we detect whether a model will loop **before generation
 
 **Workflow:**
 1. Build model-formatted chat prompts (shared `utils.build_prompt` source)
-2. Extract last-token prefill activations from those prompts
+2. Extract pooled prefill activations from those prompts (configurable pooling + layer)
 3. Generate rollout trajectories and label them (looped vs not-looped)
 4. Train a binary probe classifier on the prefill features
 5. Evaluate the probe's ability to predict looping behavior

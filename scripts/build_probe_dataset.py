@@ -21,7 +21,11 @@ if SRC not in sys.path:
 from loop_probe.configs import get_rollout_config, preset_choices
 from loop_probe.hf_data import load_prompt_records, specs_equal, split_records
 from loop_probe.labeling import labels_from_rollouts
-from loop_probe.prefill import extract_prefill_features, load_prefill_model_and_tokenizer
+from loop_probe.prefill import (
+    FEATURE_POOLING_CHOICES,
+    extract_prefill_features,
+    load_prefill_model_and_tokenizer,
+)
 from loop_probe.rollout import generate_rollout_token_ids
 from loop_probe.serialization import save_split_shards, write_manifest
 from loop_probe.types import DatasetSpec, SampleRecord
@@ -90,6 +94,21 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--loop-k", type=int, default=20)
     parser.add_argument("--shard-size", type=int, default=2048)
     parser.add_argument("--prefill-batch-size", type=int, default=1)
+    parser.add_argument(
+        "--feature-pooling",
+        choices=FEATURE_POOLING_CHOICES,
+        default="last_token",
+        help="How to pool token activations into one vector per prompt.",
+    )
+    parser.add_argument(
+        "--feature-layer",
+        type=int,
+        default=-1,
+        help=(
+            "Transformer layer index for features "
+            "(0 = first layer, -1 = final layer)."
+        ),
+    )
     parser.add_argument(
         "--reuse-if-compatible",
         action="store_true",
@@ -291,6 +310,8 @@ def _probe_cache_status(
     loop_n: int,
     loop_k: int,
     rollout_config: dict[str, object],
+    feature_pooling: str,
+    feature_layer: int,
     seed: int,
 ) -> tuple[bool, str]:
     manifest_path = os.path.join(out_dir, "manifest.json")
@@ -308,6 +329,10 @@ def _probe_cache_status(
         "split_source": split_source,
         "loop_detector": {"n": loop_n, "k": loop_k},
         "rollout_config": rollout_config,
+        "feature_extraction": {
+            "pooling": feature_pooling,
+            "layer": feature_layer,
+        },
         "train_spec": asdict(train_spec),
         "test_spec": asdict(test_spec) if test_spec else None,
     }
@@ -344,6 +369,8 @@ def _build_split(
     tokenizer,
     device,
     prefill_batch_size: int,
+    feature_pooling: str,
+    feature_layer: int,
 ):
     prompt_count = len(records)
     sample_ids = _sample_ids(records)
@@ -355,6 +382,8 @@ def _build_split(
         records,
         log_prefix=split_name,
         batch_size=prefill_batch_size,
+        feature_pooling=feature_pooling,
+        feature_layer=feature_layer,
     )
     return features, sample_ids
 
@@ -415,6 +444,8 @@ def main() -> None:
             loop_n=args.loop_n,
             loop_k=args.loop_k,
             rollout_config=rollout_cfg.to_dict(),
+            feature_pooling=args.feature_pooling,
+            feature_layer=args.feature_layer,
             seed=args.seed,
         )
         if cache_hit:
@@ -452,6 +483,8 @@ def main() -> None:
         tokenizer=tokenizer,
         device=device,
         prefill_batch_size=args.prefill_batch_size,
+        feature_pooling=args.feature_pooling,
+        feature_layer=args.feature_layer,
     )
 
     test_features, test_ids = _build_split(
@@ -461,6 +494,8 @@ def main() -> None:
         tokenizer=tokenizer,
         device=device,
         prefill_batch_size=args.prefill_batch_size,
+        feature_pooling=args.feature_pooling,
+        feature_layer=args.feature_layer,
     )
 
     input_dim = int(train_features.size(1))
@@ -521,8 +556,12 @@ def main() -> None:
     )
 
     manifest = {
-        "version": 1,
+        "version": 2,
         "input_dim": input_dim,
+        "feature_extraction": {
+            "pooling": args.feature_pooling,
+            "layer": args.feature_layer,
+        },
         "prompt_field": args.prompt_field,
         "prompt_template": {
             "source": "utils.build_prompt",

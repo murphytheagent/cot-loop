@@ -16,6 +16,9 @@ This directory contains SLURM workflows for the CoT loop detector project.
 - rollout `tp/dp` comes from `src/loop_probe/configs.py` preset defaults
 - optional rollout concurrency override: `MAX_NUM_SEQS=...`
 - optional prefill throughput override (single GPU): `PREFILL_BATCH_SIZE=...` (default: `32`)
+- optional prefill feature variant controls:
+  - `FEATURE_POOLING=last_token|mean_pool`
+  - `FEATURE_LAYER=-1` (final layer), or any earlier layer index (e.g., `12`)
 - `TRAIN_DATASET=HuggingFaceH4/MATH-500`
 - `TRAIN_SPLIT=test`
 - `TEST_DATASET` omitted by default (falls back to `data/aime_2024_2025.jsonl`)

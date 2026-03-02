@@ -2,7 +2,7 @@
 
 Purpose
 - Build a binary probe dataset from LLM runs to train a CoT loop detector:
-  - input feature = last-token activation at last layer during prefill
+  - input feature = pooled prefill activation (configurable layer + pooling rule)
   - target label = whether a rollout trajectory loops (`has_ngram_loop`)
 - Train a probe classifier (linear or MLP) on those features.
 
