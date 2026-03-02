@@ -1,0 +1,4 @@
+feature_name,ood_roc_auc,id_roc_auc,id_minus_ood_roc_auc,ood_test_positive,id_test_positive,ood_wandb_run_url,id_wandb_run_url
+last_token_final,0.6521181001283697,0.537037037037037,-0.1150810630913327,19,6,https://wandb.ai/wth_ucsd/cot-loop-probe/runs/pzce5mcr,https://wandb.ai/wth_ucsd/cot-loop-probe/runs/6njf7chg
+last_token_layer14,0.6105006105006104,0.7309941520467835,0.12049354154617309,21,3,https://wandb.ai/wth_ucsd/cot-loop-probe/runs/nv2lt8kg,https://wandb.ai/wth_ucsd/cot-loop-probe/runs/xnwp9ory
+mean_pool_final,0.46031746031746035,0.7818181818181819,0.3215007215007215,18,5,https://wandb.ai/wth_ucsd/cot-loop-probe/runs/k9qe146k,https://wandb.ai/wth_ucsd/cot-loop-probe/runs/ej6255kd
