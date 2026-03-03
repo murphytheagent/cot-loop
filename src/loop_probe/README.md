@@ -12,7 +12,7 @@ High-level flow
 3. Build train/test splits:
    - separate train/test dataset specs, or
    - identical train/test specs split deterministically with `--split-ratio`.
-4. Prefill pass (Transformers): extract one feature vector per prompt.
+4. Prefill pass (Transformers): extract one or more feature vectors per prompt.
 5. Rollout pass (vLLM): generate one trajectory per prompt.
 6. Label with loop detector (`n`-gram repeated `k` times).
 7. Save tensors as `.pt` shards and write `manifest.json`.
@@ -51,6 +51,20 @@ python scripts/build_probe_dataset.py \
   --out-dir outputs/probe_data
 ```
 
+Build a shared multi-view dataset (one rollout-label pass for multiple feature views):
+```bash
+python scripts/build_probe_dataset.py \
+  --train-dataset HuggingFaceH4/MATH-500 \
+  --train-split test \
+  --prompt-field problem \
+  --model-preset openthinker3_1p5b \
+  --feature-key last_token_final \
+  --feature-pooling last_token \
+  --feature-layer -1 \
+  --extra-feature-view mean_pool_final:mean_pool:-1 \
+  --out-dir outputs/probe_data/shared_final_views
+```
+
 Omit `--test-dataset` to use local `data/aime_2024_2025.jsonl` as test set
 ```bash
 python scripts/build_probe_dataset.py \
@@ -69,6 +83,7 @@ Train probe
 python scripts/train_probe.py \
   --data-dir outputs/probe_data \
   --out-dir outputs/probe_runs/run1 \
+  --feature-key mean_pool_final \
   --probe-preset linear \
   --wandb-project cot-loop-probe
 ```
@@ -77,6 +92,7 @@ Outputs
 - Dataset build:
   - `out_dir/train/shard-*.pt`
   - `out_dir/test/shard-*.pt`
+  - `out_dir/features/<feature_key>/{train,test}/shard-*.pt` (for extra views)
   - `out_dir/manifest.json`
 - Training:
   - `out_dir/best.pt`

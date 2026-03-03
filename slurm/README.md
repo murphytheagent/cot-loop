@@ -19,6 +19,8 @@ This directory contains SLURM workflows for the CoT loop detector project.
 - optional prefill feature variant controls:
   - `FEATURE_POOLING=last_token|mean_pool`
   - `FEATURE_LAYER=-1` (final layer), or any earlier layer index (e.g., `12`)
+  - `FEATURE_KEY=<name>` (primary view key used for training, e.g., `last_token_final`)
+  - `EXTRA_FEATURE_VIEWS="key1:pooling:layer key2:pooling:layer"` (optional extra views built in same dataset)
 - `TRAIN_DATASET=HuggingFaceH4/MATH-500`
 - `TRAIN_SPLIT=test`
 - `TEST_DATASET` omitted by default (falls back to `data/aime_2024_2025.jsonl`)
@@ -35,6 +37,15 @@ When multiple seeds are used (default: `0 1 2`), the script also writes:
 - `${OUT_RUN_DIR}/probe_multiseed_curves.png` (aggregated train/eval curves from `seed_*/metrics.jsonl`)
 
 Override values with exported environment variables or inline `VAR=... sbatch ...`.
+
+Example: build one shared dataset for both final-layer views, then train `last_token_final`:
+```bash
+FEATURE_KEY=last_token_final \
+FEATURE_POOLING=last_token \
+FEATURE_LAYER=-1 \
+EXTRA_FEATURE_VIEWS="mean_pool_final:mean_pool:-1" \
+sbatch slurm/run_probe_train_e2e.sbatch
+```
 
 ## Optional Trajectory Generation
 

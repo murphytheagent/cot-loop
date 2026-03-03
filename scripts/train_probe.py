@@ -16,7 +16,12 @@ SRC = os.path.join(ROOT, "src")
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
-from loop_probe.dataloader import make_dataloader, read_manifest
+from loop_probe.dataloader import (
+    make_dataloader,
+    read_manifest,
+    resolve_input_dim,
+    resolve_split_info,
+)
 from loop_probe.configs import (
     build_probe_model,
     get_probe_config,
@@ -51,6 +56,14 @@ def _parse_args() -> argparse.Namespace:
         "--probe-preset",
         choices=probe_preset_choices(),
         default="linear",
+    )
+    parser.add_argument(
+        "--feature-key",
+        default=None,
+        help=(
+            "Optional feature view key from a multi-view dataset manifest. "
+            "If omitted, uses manifest default or legacy single-view fields."
+        ),
     )
 
     parser.add_argument("--wandb-project", required=True)
@@ -151,7 +164,12 @@ def main() -> None:
     import wandb
 
     manifest = read_manifest(args.data_dir)
-    input_dim = int(manifest["input_dim"])
+    train_info, resolved_feature_key = resolve_split_info(
+        manifest,
+        split="train",
+        feature_key=args.feature_key,
+    )
+    input_dim = resolve_input_dim(manifest, resolved_feature_key)
     try:
         probe_cfg = get_probe_config(args.probe_preset)
     except ValueError as exc:
@@ -164,6 +182,7 @@ def main() -> None:
         shuffle=True,
         num_workers=args.num_workers,
         pin_memory=(device.type == "cuda"),
+        feature_key=resolved_feature_key,
     )
     test_loader = make_dataloader(
         args.data_dir,
@@ -172,13 +191,13 @@ def main() -> None:
         shuffle=False,
         num_workers=args.num_workers,
         pin_memory=(device.type == "cuda"),
+        feature_key=resolved_feature_key,
     )
     steps_per_epoch = len(train_loader)
     if steps_per_epoch < 1:
         raise SystemExit("Training split is empty.")
     total_steps = args.epochs * steps_per_epoch
 
-    train_info = manifest.get("train", {})
     num_pos = int(train_info.get("num_positive", 0))
     num_neg = int(train_info.get("num_negative", 0))
     if num_pos > 0 and num_neg > 0:
@@ -205,6 +224,7 @@ def main() -> None:
         name=args.wandb_run_name,
         config={
             "data_dir": args.data_dir,
+            "feature_key": resolved_feature_key,
             "input_dim": input_dim,
             "epochs": args.epochs,
             "batch_size": args.batch_size,

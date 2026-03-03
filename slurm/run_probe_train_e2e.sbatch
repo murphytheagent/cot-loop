@@ -87,6 +87,8 @@ MAX_TOKENS="${MAX_TOKENS:-}"
 PREFILL_BATCH_SIZE="${PREFILL_BATCH_SIZE:-32}"
 FEATURE_POOLING="${FEATURE_POOLING:-last_token}"
 FEATURE_LAYER="${FEATURE_LAYER:--1}"
+FEATURE_KEY="${FEATURE_KEY:-}"
+EXTRA_FEATURE_VIEWS="${EXTRA_FEATURE_VIEWS:-}"
 
 LOOP_N="${LOOP_N:-30}"
 LOOP_K="${LOOP_K:-10}"
@@ -131,6 +133,7 @@ fi
 echo "[probe-e2e] model_preset=${MODEL_PRESET} train=${TRAIN_DATASET}:${TRAIN_SPLIT} test=${TEST_DATASET}:${TEST_SPLIT}"
 echo "[probe-e2e] probe_preset=${PROBE_PRESET}"
 echo "[probe-e2e] feature_pooling=${FEATURE_POOLING} feature_layer=${FEATURE_LAYER}"
+echo "[probe-e2e] feature_key=${FEATURE_KEY} extra_feature_views='${EXTRA_FEATURE_VIEWS}'"
 echo "[probe-e2e] resolved seeds: ${SEED_LIST[*]}"
 
 BUILD_ARGS=(
@@ -173,6 +176,16 @@ fi
 if [[ -n "${MAX_TOKENS}" ]]; then
   BUILD_ARGS+=(--max-tokens "${MAX_TOKENS}")
 fi
+if [[ -n "${FEATURE_KEY}" ]]; then
+  BUILD_ARGS+=(--feature-key "${FEATURE_KEY}")
+fi
+if [[ -n "${EXTRA_FEATURE_VIEWS}" ]]; then
+  declare -a EXTRA_VIEW_SPECS=()
+  read -r -a EXTRA_VIEW_SPECS <<< "${EXTRA_FEATURE_VIEWS}"
+  for VIEW_SPEC in "${EXTRA_VIEW_SPECS[@]}"; do
+    BUILD_ARGS+=(--extra-feature-view "${VIEW_SPEC}")
+  done
+fi
 
 echo "[probe-e2e] validating/reusing dataset at ${OUT_DATA_DIR} with dataset_seed=${DATASET_SEED}"
 python scripts/build_probe_dataset.py "${BUILD_ARGS[@]}" --reuse-if-compatible
@@ -202,6 +215,9 @@ for RUN_SEED in "${SEED_LIST[@]}"; do
     --wandb-project "${WANDB_PROJECT}"
     --wandb-run-name "${SEED_WANDB_RUN_NAME}"
   )
+  if [[ -n "${FEATURE_KEY}" ]]; then
+    TRAIN_ARGS+=(--feature-key "${FEATURE_KEY}")
+  fi
 
   echo "[probe-e2e] seed=${RUN_SEED}: train probe data_dir=${OUT_DATA_DIR} out_dir=${SEED_RUN_DIR} probe_preset=${PROBE_PRESET}"
   python scripts/train_probe.py "${TRAIN_ARGS[@]}" ${TRAIN_EXTRA_ARGS}

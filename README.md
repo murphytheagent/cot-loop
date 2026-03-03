@@ -8,7 +8,7 @@ The core hypothesis: Can we detect whether a model will loop **before generation
 
 **Workflow:**
 1. Build model-formatted chat prompts (shared `utils.build_prompt` source)
-2. Extract pooled prefill activations from those prompts (configurable pooling + layer)
+2. Extract pooled prefill activations from those prompts (one or more configurable pooling/layer views)
 3. Generate rollout trajectories and label them (looped vs not-looped)
 4. Train a binary probe classifier on the prefill features
 5. Evaluate the probe's ability to predict looping behavior
@@ -63,6 +63,24 @@ For this default local test file, loader behavior is hardcoded to use
 Optional: if you want a random split of one dataset, pass identical train/test specs
 and use `--split-ratio`.
 
+To build one shared rollout-label dataset that can be reused by both
+`last_token_final` and `mean_pool_final`:
+
+```bash
+python scripts/build_probe_dataset.py \
+  --train-dataset HuggingFaceH4/MATH-500 \
+  --train-split test \
+  --test-dataset data/aime_2024_2025.jsonl \
+  --test-split test \
+  --prompt-field problem \
+  --model-preset openthinker3_1p5b \
+  --feature-key last_token_final \
+  --feature-pooling last_token \
+  --feature-layer -1 \
+  --extra-feature-view mean_pool_final:mean_pool:-1 \
+  --out-dir outputs/probe_data/openthinker3_1p5b_shared_final_views
+```
+
 ### Train Probe
 
 ```bash
@@ -70,10 +88,13 @@ python scripts/train_probe.py \
   --data-dir outputs/probe_data \
   --out-dir outputs/probe_runs/run1 \
   --probe-preset linear \
+  --feature-key mean_pool_final \
   --wandb-project cot-loop-probe \
   --epochs 10 \
   --batch-size 256
 ```
+
+`--feature-key` is optional. If omitted, the manifest default view is used.
 
 Available probe presets:
 - `linear` (default)
@@ -133,6 +154,7 @@ A sequence is labeled as "looped" if any 30-gram appears ≥20 times in the gene
 - `{out_dir}/train/shard-*.pt` - Training shards (features + labels)
 - `{out_dir}/test/shard-*.pt` - Test shards
 - `{out_dir}/manifest.json` - Dataset metadata and configuration
+- `{out_dir}/features/<feature_key>/{train,test}/shard-*.pt` - Additional feature views (when `--extra-feature-view` is used)
 
 **Training:**
 - `{out_dir}/best.pt` - Best checkpoint (by ROC-AUC, then macro-F1)
