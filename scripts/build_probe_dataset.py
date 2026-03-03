@@ -433,6 +433,7 @@ def _probe_cache_status(
     loop_n: int,
     loop_k: int,
     rollout_config: dict[str, object],
+    requested_primary_feature_key: str,
     requested_feature_views: dict[str, dict[str, object]],
     seed: int,
 ) -> tuple[bool, str]:
@@ -471,6 +472,16 @@ def _probe_cache_status(
 
     feature_views = manifest.get("feature_views")
     if isinstance(feature_views, dict):
+        manifest_default_feature_key = manifest.get("default_feature_key")
+        if not isinstance(manifest_default_feature_key, str) or not manifest_default_feature_key:
+            return False, "manifest missing default_feature_key for multi-view dataset"
+        if manifest_default_feature_key != requested_primary_feature_key:
+            return (
+                False,
+                "manifest mismatch on 'default_feature_key' "
+                f"(cached='{manifest_default_feature_key}', requested='{requested_primary_feature_key}')",
+            )
+
         for key, requested in requested_feature_views.items():
             view_info = feature_views.get(key)
             if not isinstance(view_info, dict):
@@ -596,6 +607,7 @@ def main() -> None:
             loop_n=args.loop_n,
             loop_k=args.loop_k,
             rollout_config=rollout_cfg.to_dict(),
+            requested_primary_feature_key=primary_feature_key,
             requested_feature_views=feature_views,
             seed=args.seed,
         )
