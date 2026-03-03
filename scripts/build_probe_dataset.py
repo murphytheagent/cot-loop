@@ -40,6 +40,7 @@ RATIO_SPLIT_SOURCES = {
     "same_train_test_source_ratio_split",
 }
 FEATURE_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
+BALANCE_CHOICES = ("none", "downsample")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -133,6 +134,30 @@ def _parse_args() -> argparse.Namespace:
         "--reuse-if-compatible",
         action="store_true",
         help="Skip rebuilding when out-dir has a compatible manifest and shard files.",
+    )
+    parser.add_argument(
+        "--balance-train",
+        choices=BALANCE_CHOICES,
+        default="none",
+        help=(
+            "Optional balancing policy for the train split after loop labels are built. "
+            "'downsample' keeps equal positives/negatives by random majority-class subsampling."
+        ),
+    )
+    parser.add_argument(
+        "--balance-test",
+        choices=BALANCE_CHOICES,
+        default="none",
+        help=(
+            "Optional balancing policy for the test split after loop labels are built. "
+            "'downsample' keeps equal positives/negatives by random majority-class subsampling."
+        ),
+    )
+    parser.add_argument(
+        "--balance-seed",
+        type=int,
+        default=None,
+        help="Optional balancing RNG seed. Defaults to --seed when omitted.",
     )
     parser.add_argument("--out-dir", required=True)
 
@@ -436,6 +461,9 @@ def _probe_cache_status(
     requested_primary_feature_key: str,
     requested_feature_views: dict[str, dict[str, object]],
     seed: int,
+    balance_train: str,
+    balance_test: str,
+    balance_seed: int,
 ) -> tuple[bool, str]:
     manifest_path = os.path.join(out_dir, "manifest.json")
     if not os.path.exists(manifest_path):
@@ -460,6 +488,18 @@ def _probe_cache_status(
     for key, value in expected.items():
         if manifest.get(key) != value:
             return False, f"manifest mismatch on '{key}'"
+
+    expected_balancing = {
+        "train": balance_train,
+        "test": balance_test,
+        "seed": balance_seed,
+    }
+    manifest_balancing = manifest.get("balancing")
+    if manifest_balancing is None:
+        if balance_train != "none" or balance_test != "none":
+            return False, "manifest missing balancing metadata"
+    elif manifest_balancing != expected_balancing:
+        return False, "manifest mismatch on 'balancing'"
 
     manifest_seed = manifest.get("seed", None)
     if manifest_seed is not None:
@@ -572,6 +612,40 @@ def _label_split(
     )
 
 
+def _balanced_indices(
+    labels: list[int],
+    *,
+    split_name: str,
+    mode: str,
+    seed: int,
+) -> list[int]:
+    if mode == "none":
+        return list(range(len(labels)))
+
+    if mode != "downsample":
+        raise SystemExit(f"Unsupported balance mode '{mode}' for split '{split_name}'.")
+
+    positive_idx = [idx for idx, label in enumerate(labels) if int(label) == 1]
+    negative_idx = [idx for idx, label in enumerate(labels) if int(label) == 0]
+    if not positive_idx or not negative_idx:
+        raise SystemExit(
+            f"Cannot downsample-balance split '{split_name}' because one class is missing "
+            f"(pos={len(positive_idx)}, neg={len(negative_idx)})."
+        )
+
+    target_per_class = min(len(positive_idx), len(negative_idx))
+    rng = random.Random(seed)
+    rng.shuffle(positive_idx)
+    rng.shuffle(negative_idx)
+    keep = positive_idx[:target_per_class] + negative_idx[:target_per_class]
+    keep.sort()
+    return keep
+
+
+def _subset_list(values: list[int], keep_indices: list[int]) -> list[int]:
+    return [values[idx] for idx in keep_indices]
+
+
 def main() -> None:
     args = _parse_args()
 
@@ -595,6 +669,7 @@ def main() -> None:
     train_spec, test_spec = _make_specs(args)
     split_source = _resolve_split_source(train_spec, test_spec)
     primary_feature_key, feature_views = _resolve_feature_views(args)
+    balance_seed = args.seed if args.balance_seed is None else args.balance_seed
 
     if args.reuse_if_compatible:
         cache_hit, reason = _probe_cache_status(
@@ -610,6 +685,9 @@ def main() -> None:
             requested_primary_feature_key=primary_feature_key,
             requested_feature_views=feature_views,
             seed=args.seed,
+            balance_train=args.balance_train,
+            balance_test=args.balance_test,
+            balance_seed=balance_seed,
         )
         if cache_hit:
             print(
@@ -682,6 +760,24 @@ def main() -> None:
     split_at = len(train_prompts)
     train_labels = all_labels[:split_at]
     test_labels = all_labels[split_at:]
+    train_keep_idx = _balanced_indices(
+        train_labels,
+        split_name="train",
+        mode=args.balance_train,
+        seed=balance_seed,
+    )
+    test_keep_idx = _balanced_indices(
+        test_labels,
+        split_name="test",
+        mode=args.balance_test,
+        seed=balance_seed + 1,
+    )
+    train_labels = _subset_list(train_labels, train_keep_idx)
+    test_labels = _subset_list(test_labels, test_keep_idx)
+    train_ids = _subset_list(train_ids, train_keep_idx)
+    test_ids = _subset_list(test_ids, test_keep_idx)
+    train_keep_idx_t = torch.tensor(train_keep_idx, dtype=torch.long)
+    test_keep_idx_t = torch.tensor(test_keep_idx, dtype=torch.long)
 
     feature_views_manifest: dict[str, dict[str, object]] = {}
     primary_train_meta: dict[str, object] | None = None
@@ -695,6 +791,8 @@ def main() -> None:
             raise SystemExit(
                 f"Missing extracted features for requested view '{feature_key}'."
             )
+        train_features = train_features.index_select(0, train_keep_idx_t)
+        test_features = test_features.index_select(0, test_keep_idx_t)
 
         input_dim = int(train_features.size(1))
         if int(test_features.size(1)) != input_dim:
@@ -774,6 +872,11 @@ def main() -> None:
         "loop_detector": {
             "n": args.loop_n,
             "k": args.loop_k,
+        },
+        "balancing": {
+            "train": args.balance_train,
+            "test": args.balance_test,
+            "seed": balance_seed,
         },
         "rollout_config": rollout_cfg.to_dict(),
         "train_spec": asdict(train_spec),

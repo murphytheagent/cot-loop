@@ -81,6 +81,25 @@ python scripts/build_probe_dataset.py \
   --out-dir outputs/probe_data/openthinker3_1p5b_shared_final_views
 ```
 
+For balanced train/test probes after label construction:
+
+```bash
+python scripts/build_probe_dataset.py \
+  --train-dataset SuperSecureHuman/competition_math_hf_dataset \
+  --train-split train \
+  --train-max-samples 1800 \
+  --test-dataset SuperSecureHuman/competition_math_hf_dataset \
+  --test-split test \
+  --test-max-samples 600 \
+  --prompt-field problem \
+  --model-preset openthinker3_1p5b \
+  --feature-key last_token_final \
+  --extra-feature-view mean_pool_final:mean_pool:-1 \
+  --balance-train downsample \
+  --balance-test downsample \
+  --out-dir outputs/probe_data/openthinker3_balanced_shared_final_views
+```
+
 ### Train Probe
 
 ```bash
@@ -99,6 +118,43 @@ python scripts/train_probe.py \
 Available probe presets:
 - `linear` (default)
 - `mlp` (one hidden layer; shape is defined in `src/loop_probe/configs.py`)
+
+### Train RFM-lite Probe
+
+```bash
+python scripts/train_rfm_probe.py \
+  --data-dir outputs/probe_data/openthinker3_balanced_shared_final_views \
+  --feature-key last_token_final \
+  --out-dir outputs/probe_runs/rfm_last_token/seed_0 \
+  --seed 0 \
+  --random-features 2048 \
+  --bandwidth 1.0 \
+  --ridge 0.1 \
+  --rfm-steps 1 \
+  --grad-weight 1.0
+```
+
+### Evaluate Saved Checkpoints on Another Split/Dataset
+
+Torch probe checkpoint (`best.pt` / `last.pt`):
+
+```bash
+python scripts/eval_probe_checkpoint.py \
+  --checkpoint outputs/probe_runs/run1/best.pt \
+  --data-dir outputs/probe_data/other_eval_dataset \
+  --feature-key last_token_final \
+  --split test
+```
+
+RFM-lite checkpoint (`best_model.pt`):
+
+```bash
+python scripts/eval_rfm_checkpoint.py \
+  --checkpoint outputs/probe_runs/rfm_last_token/seed_0/best_model.pt \
+  --data-dir outputs/probe_data/other_eval_dataset \
+  --feature-key last_token_final \
+  --split test
+```
 
 ### SLURM End-to-End Probe Job
 
@@ -162,6 +218,12 @@ A sequence is labeled as "looped" if any 30-gram appears ≥20 times in the gene
 - `{out_dir}/metrics.jsonl` - Per-epoch evaluation metrics
 - `{out_dir}/best_metrics.json` - Best eval row summary for this run
 
+**RFM-lite training (`scripts/train_rfm_probe.py`):**
+- `{out_dir}/best_model.pt` - Serialized RFM-lite pipeline checkpoint
+- `{out_dir}/model_summary.json` - RFM-lite hyperparameters and selected step
+- `{out_dir}/metrics.jsonl` - Per-step train/eval metrics
+- `{out_dir}/best_metrics.json` - Best eval row summary for this run
+
 **Multi-seed SLURM summary:**
 - `${OUT_RUN_DIR}/seed_summary.json` - Per-seed best rows + aggregate mean/std
 - `${OUT_RUN_DIR}/seed_summary.csv` - Aggregate mean/std table
@@ -193,6 +255,9 @@ cot-loop/
 ├── scripts/
 │   ├── build_probe_dataset.py  # Extract features & labels
 │   ├── train_probe.py          # Train probe classifier
+│   ├── train_rfm_probe.py      # Train RFM-lite probe
+│   ├── eval_probe_checkpoint.py # Evaluate torch probe checkpoints
+│   ├── eval_rfm_checkpoint.py  # Evaluate RFM-lite checkpoints
 │   ├── aggregate_probe_runs.py # Multi-seed mean/std summary
 │   └── [loop analysis scripts]
 ├── slurm/                   # SLURM batch scripts
