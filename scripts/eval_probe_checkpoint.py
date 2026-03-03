@@ -104,7 +104,7 @@ def main() -> None:
         split=args.split,
         feature_key=args.feature_key,
     )
-    num_rows = int(split_info.get("num_rows", 0))
+    num_rows = int(split_info.get("num_rows", split_info.get("num_samples", 0)))
     if num_rows < 1:
         raise SystemExit(f"Split '{args.split}' in {args.data_dir} has no rows.")
 
