@@ -54,10 +54,23 @@ export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-${DEFAULT_CACHE_BASE}/vllm}"
 export TORCH_HOME="${TORCH_HOME:-${DEFAULT_CACHE_BASE}/torch}"
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-${DEFAULT_CACHE_BASE}}"
 
+canonicalize_path() {
+  python - "$1" <<'PY'
+import os
+import sys
+
+path = sys.argv[1]
+print(os.path.realpath(os.path.abspath(os.path.expanduser(path))))
+PY
+}
+
+HOME_REALPATH="$(canonicalize_path "${HOME}")"
+
 for cache_var in HF_HOME HUGGINGFACE_HUB_CACHE TRANSFORMERS_CACHE VLLM_CACHE_ROOT TORCH_HOME XDG_CACHE_HOME; do
   cache_val="${!cache_var}"
-  if [[ "${cache_val}" == "${HOME}"* ]]; then
-    echo "[k5-threeview-data] ${cache_var} points to HOME (${cache_val}); refusing to run" >&2
+  cache_realpath="$(canonicalize_path "${cache_val}")"
+  if [[ "${cache_realpath}" == "${HOME_REALPATH}" || "${cache_realpath}" == "${HOME_REALPATH}/"* ]]; then
+    echo "[k5-threeview-data] ${cache_var} resolves under HOME (${cache_val} -> ${cache_realpath}); refusing to run" >&2
     exit 1
   fi
 done
