@@ -1,0 +1,128 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{hyperref}
+\usepackage{longtable}
+\title{CoT Loop Detection PR \#2\\Consolidated Experiment Results}
+\author{}
+\date{2026-03-04 00:08 UTC}
+
+\begin{document}
+\maketitle
+
+\section*{Scope}
+This document consolidates the completed experiment results and findings for PR \#2 in \texttt{cot-loop}.
+
+\section*{Fixed Setup Used for Main Comparisons}
+\begin{itemize}
+  \item Base model preset: \texttt{openthinker3\_1p5b}
+  \item Loop labeling: \texttt{n=30}, default threshold focus on \texttt{k=20}
+  \item Probe family: MLP and linear probes (depending on round)
+  \item Primary metrics: ROC-AUC, macro-F1, accuracy
+\end{itemize}
+
+\section*{Round A: Initial Threshold/Architecture Matrix (Before Horizon Fix)}
+\begin{center}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Run & Accuracy & Macro-F1 & ROC-AUC \\
+\midrule
+k10-mlp & 0.96667 & 0.49153 & 0.28448 \\
+k10-linear & 0.70000 & 0.41176 & 0.56034 \\
+k20-mlp & 1.00000 & 1.00000 & nan \\
+k20-linear & 0.71667 & 0.41748 & nan \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Key finding: \texttt{k=20} test split had \texttt{0/60} positives with short decode horizon (\texttt{max\_tokens=2048}), making discrimination metrics degenerate at \texttt{k=20}.
+
+\section*{Round B: Decode-Horizon Correction (max\_tokens=30000)}
+\begin{center}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Run & Accuracy & Macro-F1 & ROC-AUC \\
+\midrule
+k20tok30k-mlp & 0.43333 & 0.43270 & 0.65994 \\
+k20tok30k-linear & 0.51667 & 0.41513 & 0.44099 \\
+k10tok30k-mlp & 0.45000 & 0.41333 & 0.60517 \\
+k10tok30k-linear & 0.58333 & 0.54696 & 0.50881 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Label coverage after correction:
+\begin{itemize}
+  \item \texttt{k=20 tok30000}: \texttt{14/60} positives
+  \item \texttt{k=10 tok30000}: \texttt{23/60} positives
+\end{itemize}
+
+\noindent
+Key finding: with matched token budget and restored positive coverage, MLP ROC-AUC exceeds linear at both thresholds.
+
+\section*{Round C: Locked k20/tok30000 Feature ID-vs-OOD Ablation (MLP)}
+OOD split: train on MATH-500 and evaluate on AIME.\\
+ID split: disjoint MATH-500 train/test.
+
+\begin{center}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Feature view & OOD ROC-AUC & ID ROC-AUC & ID-OOD & ID positives \\
+\midrule
+last\_token\_final & 0.6521 & 0.5370 & -0.1151 & 6/60 \\
+mean\_pool\_final & 0.4603 & 0.7818 & +0.3215 & 5/60 \\
+last\_token\_layer14 & 0.6105 & 0.7310 & +0.1205 & 3/60 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Caveat: each feature run rebuilt labels independently, and ID positives were sparse (3--6/60), so this round is directional rather than strictly apples-to-apples.
+
+\section*{Round D: Matched-Label Shared-View Comparison (n=3 seeds)}
+Shared dataset was built once and reused for both final-layer views, yielding identical eval labels (\texttt{17/60} positives).
+
+\begin{center}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Feature view & ROC-AUC (mean$\pm$std) & PR-AUC (mean$\pm$std) & Macro-F1 (mean$\pm$std) & Accuracy (mean$\pm$std) \\
+\midrule
+last\_token\_final & 0.5723$\pm$0.0909 & 0.3684$\pm$0.0803 & 0.3866$\pm$0.0621 & 0.3944$\pm$0.0567 \\
+mean\_pool\_final & 0.5695$\pm$0.0553 & 0.3892$\pm$0.0701 & 0.3176$\pm$0.1369 & 0.4000$\pm$0.1650 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Key findings on matched labels:
+\begin{itemize}
+  \item ROC-AUC is effectively tied between \texttt{last\_token\_final} and \texttt{mean\_pool\_final}.
+  \item \texttt{mean\_pool\_final} is slightly higher on PR-AUC in this run.
+  \item \texttt{last\_token\_final} is more stable and better on average macro-F1.
+  \item Accuracy is non-primary under imbalance (majority baseline here is \texttt{43/60 = 0.7167}).
+\end{itemize}
+
+\section*{Implementation Outcomes Included in PR \#2}
+\begin{itemize}
+  \item Shared multi-view dataset build so one rollout-label pass can feed both final-layer feature views.
+  \item Feature-key aware training/evaluation paths for selecting a specific feature view from shared datasets.
+  \item Imbalance-aware metrics added to evaluation logging (PR-AUC, positive-class precision/recall/F1, prevalence).
+  \item Follow-up Codex review fixes applied on cache compatibility and feature-key handling paths.
+\end{itemize}
+
+\section*{Run Links (Representative)}
+\begin{itemize}
+  \item k20tok30k MLP: \url{https://wandb.ai/wth_ucsd/cot-loop-probe/runs/soqtbttg}
+  \item k20tok30k Linear: \url{https://wandb.ai/wth_ucsd/cot-loop-probe/runs/rlb14to8}
+  \item k10tok30k MLP: \url{https://wandb.ai/wth_ucsd/cot-loop-probe/runs/8p88mi8m}
+  \item k10tok30k Linear: \url{https://wandb.ai/wth_ucsd/cot-loop-probe/runs/v6jz4hr1}
+  \item OOD last\_token\_final: \url{https://wandb.ai/wth_ucsd/cot-loop-probe/runs/pzce5mcr}
+  \item ID last\_token\_final: \url{https://wandb.ai/wth_ucsd/cot-loop-probe/runs/6njf7chg}
+  \item OOD mean\_pool\_final: \url{https://wandb.ai/wth_ucsd/cot-loop-probe/runs/k9qe146k}
+  \item ID mean\_pool\_final: \url{https://wandb.ai/wth_ucsd/cot-loop-probe/runs/ej6255kd}
+\end{itemize}
+
+\end{document}
