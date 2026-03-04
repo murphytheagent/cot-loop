@@ -59,10 +59,17 @@ def _probe_cfg_from_checkpoint(
         if probe_type == "mlp":
             hidden_dim = int(probe_cfg_raw.get("hidden_dim", 128))
             dropout = float(probe_cfg_raw.get("dropout", 0.1))
+            depth = int(
+                probe_cfg_raw.get(
+                    "depth",
+                    probe_cfg_raw.get("mlp_depth", 1),
+                )
+            )
             return ProbeConfig(
                 probe_type="mlp",
                 hidden_dim=hidden_dim,
                 dropout=dropout,
+                depth=depth,
             )
         raise SystemExit(
             f"Unsupported probe_type in checkpoint probe_config: '{probe_type}'"
@@ -98,19 +105,28 @@ def main() -> None:
     if not os.path.exists(args.checkpoint):
         raise SystemExit(f"Checkpoint not found: {args.checkpoint}")
 
+    payload = torch.load(args.checkpoint, map_location="cpu")
+    if not isinstance(payload, dict) or "state_dict" not in payload:
+        raise SystemExit(f"Checkpoint payload missing state_dict: {args.checkpoint}")
+
+    checkpoint_feature_key = payload.get("feature_key")
+    resolved_feature_key_arg = args.feature_key
+    if (
+        (resolved_feature_key_arg is None or resolved_feature_key_arg == "")
+        and isinstance(checkpoint_feature_key, str)
+        and checkpoint_feature_key
+    ):
+        resolved_feature_key_arg = checkpoint_feature_key
+
     manifest = read_manifest(args.data_dir)
     split_info, resolved_feature_key = resolve_split_info(
         manifest,
         split=args.split,
-        feature_key=args.feature_key,
+        feature_key=resolved_feature_key_arg,
     )
     num_rows = int(split_info.get("num_rows", split_info.get("num_samples", 0)))
     if num_rows < 1:
         raise SystemExit(f"Split '{args.split}' in {args.data_dir} has no rows.")
-
-    payload = torch.load(args.checkpoint, map_location="cpu")
-    if not isinstance(payload, dict) or "state_dict" not in payload:
-        raise SystemExit(f"Checkpoint payload missing state_dict: {args.checkpoint}")
 
     probe_cfg = _probe_cfg_from_checkpoint(payload, args.probe_preset)
     input_dim = resolve_input_dim(manifest, resolved_feature_key)

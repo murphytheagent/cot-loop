@@ -619,7 +619,28 @@ def _probe_cache_status(
             "layer": only_view["layer"],
         }
         manifest_feature = manifest.get("feature_extraction")
-        if manifest_feature is not None and manifest_feature != expected_feature:
+        if manifest_feature is None:
+            legacy_default_feature = {
+                "pooling": "last_token",
+                "layer": -1,
+            }
+            legacy_default_key = _default_feature_key(
+                pooling=legacy_default_feature["pooling"],
+                feature_layer=legacy_default_feature["layer"],
+            )
+            if expected_feature != legacy_default_feature:
+                return (
+                    False,
+                    "legacy manifest missing feature_extraction metadata cannot satisfy "
+                    "non-default feature view request",
+                )
+            if requested_primary_feature_key != legacy_default_key:
+                return (
+                    False,
+                    "legacy manifest missing feature_extraction metadata cannot satisfy "
+                    f"primary feature key '{requested_primary_feature_key}'",
+                )
+        elif manifest_feature != expected_feature:
             return False, "manifest mismatch on 'feature_extraction'"
         if not _split_shards_exist(out_dir, manifest.get("train")):
             return False, "train shards are missing"

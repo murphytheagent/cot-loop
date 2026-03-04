@@ -118,6 +118,7 @@ def _checkpoint_payload(
     step: int,
     metrics: dict[str, float],
     probe_config: dict[str, object] | None = None,
+    feature_key: str | None = None,
 ) -> dict[str, object]:
     payload = {
         "epoch": epoch,
@@ -127,6 +128,8 @@ def _checkpoint_payload(
     }
     if probe_config is not None:
         payload["probe_config"] = probe_config
+    if feature_key:
+        payload["feature_key"] = feature_key
     return payload
 
 
@@ -433,6 +436,7 @@ def main() -> None:
                         global_step,
                         eval_metrics,
                         probe_config=probe_cfg.to_dict(),
+                        feature_key=resolved_feature_key,
                     ),
                     best_ckpt,
                 )
@@ -489,6 +493,7 @@ def main() -> None:
                     "train_pr_auc": train_metrics_epoch["pr_auc"],
                 },
                 probe_config=probe_cfg.to_dict(),
+                feature_key=resolved_feature_key,
             ),
             last_ckpt,
         )
