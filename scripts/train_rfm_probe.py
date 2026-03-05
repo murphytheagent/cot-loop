@@ -313,7 +313,7 @@ def main() -> None:
             _rank_metric(row.get(args.selection_metric)),
             _rank_metric(row.get(args.tie_breaker)),
         )
-        if rank > best_key:
+        if best_row is None or rank > best_key:
             best_key = rank
             best_row = dict(row)
             best_state = {

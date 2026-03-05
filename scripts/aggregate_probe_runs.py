@@ -8,6 +8,7 @@ import csv
 import json
 import math
 import os
+import re
 import statistics
 
 
@@ -67,6 +68,22 @@ def _as_float_or_nan(value: object) -> float:
         return float(value)
     except (TypeError, ValueError):
         return float("nan")
+
+
+def _infer_selection_pair(row: dict[str, object]) -> tuple[str, str] | None:
+    selection_metric = row.get("selection_metric")
+    tie_breaker = row.get("tie_breaker")
+    if isinstance(selection_metric, str) and isinstance(tie_breaker, str):
+        return selection_metric, tie_breaker
+
+    selection_rule = row.get("selection_rule")
+    if not isinstance(selection_rule, str):
+        return None
+
+    parts = re.findall(r"max\(([^)]+)\)", selection_rule)
+    if len(parts) >= 2:
+        return parts[0], parts[1]
+    return None
 
 
 def _best_row_from_jsonl(
@@ -141,28 +158,28 @@ def _load_best_row(
 ) -> dict[str, object]:
     best_metrics_path = os.path.join(run_dir, "best_metrics.json")
     metrics_jsonl = os.path.join(run_dir, "metrics.jsonl")
-    if os.path.exists(metrics_jsonl) and (selection_metric, tie_breaker) != DEFAULT_SELECTION:
-        row = _best_row_from_jsonl(
-            metrics_jsonl,
-            selection_metric=selection_metric,
-            tie_breaker=tie_breaker,
-        )
-        return _format_row(run_dir, row)
+    best_row: dict[str, object] | None = None
+    best_selection: tuple[str, str] | None = None
+
     if os.path.exists(best_metrics_path):
         with open(best_metrics_path, "r", encoding="utf-8") as f:
-            row = json.load(f)
-    else:
-        if not os.path.exists(metrics_jsonl):
-            raise SystemExit(
-                f"Missing both best_metrics.json and metrics.jsonl under {run_dir}"
-            )
-        row = _best_row_from_jsonl(
-            metrics_jsonl,
-            selection_metric=selection_metric,
-            tie_breaker=tie_breaker,
-        )
+            best_row = json.load(f)
+        best_selection = _infer_selection_pair(best_row)
 
-    return _format_row(run_dir, row)
+    if os.path.exists(metrics_jsonl):
+        if best_row is None or best_selection != (selection_metric, tie_breaker):
+            row = _best_row_from_jsonl(
+                metrics_jsonl,
+                selection_metric=selection_metric,
+                tie_breaker=tie_breaker,
+            )
+            return _format_row(run_dir, row)
+        return _format_row(run_dir, best_row)
+
+    if best_row is not None:
+        return _format_row(run_dir, best_row)
+
+    raise SystemExit(f"Missing both best_metrics.json and metrics.jsonl under {run_dir}")
 
 
 def _aggregate(rows: list[dict[str, object]], metric: str) -> dict[str, object]:
