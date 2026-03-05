@@ -6,13 +6,13 @@
 \usepackage{longtable}
 \title{CoT Loop Detection PR \#2\\Consolidated Experiment Results}
 \author{}
-\date{2026-03-05 16:27 UTC}
+\date{2026-03-05 17:18 UTC}
 
 \begin{document}
 \maketitle
 
 \section*{Scope}
-This document consolidates the completed experiment results and findings for PR \#2 in \texttt{cot-loop}. Scope covered: 2026-03-01 19:00 UTC through 2026-03-05 16:27 UTC.
+This document consolidates the completed experiment results and findings for PR \#2 in \texttt{cot-loop}. Scope covered: 2026-03-01 19:00 UTC through 2026-03-05 17:18 UTC.
 
 \section*{Fixed Setup Used for Main Comparisons}
 \begin{itemize}
@@ -204,6 +204,9 @@ Key finding: posterior (completion) features are materially stronger than prefil
   \item MLP architecture controls (hidden dim, depth, dropout) plus k=5 dataset/ablation SLURM launchers.
   \item Rollout data-parallel IPC hardened to avoid semaphore rebuild failures.
   \item Runtime hardening: canonicalized cache guard for HOME, prefill-only builds skip retaining rollout token IDs, and explicit \texttt{--probe-preset} is required when a checkpoint lacks \texttt{probe\_config}.
+  \item Aggregation now reselects from \texttt{metrics.jsonl} whenever selection/tie-breaker differ or cannot be inferred, preventing stale default summaries.
+  \item RFM training now falls back to a best-row selection when all ranking metrics are NaN.
+  \item Completion-view prompt+rollout merges are now built per batch to reduce host RAM pressure.
 \end{itemize}
 
 \section*{Recommended Next Step}

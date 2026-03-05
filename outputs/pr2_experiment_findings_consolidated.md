@@ -1,7 +1,7 @@
 # CoT Loop Detection PR #2: Consolidated Experiments and Findings
 
-Last updated: 2026-03-05 16:27 UTC
-Scope covered: 2026-03-01 19:00 UTC through 2026-03-05 16:27 UTC
+Last updated: 2026-03-05 17:18 UTC
+Scope covered: 2026-03-01 19:00 UTC through 2026-03-05 17:18 UTC
 PR: https://github.com/Zhi0467/cot-loop/pull/2
 
 ## Goal
@@ -111,6 +111,9 @@ Implemented in PR #2 branch (`task/1772391564-ood-feature-ablation`):
 - MLP architecture controls (`--mlp-hidden-dim`, `--mlp-depth`, `--mlp-dropout`).
 - Added k=5 dataset/ablation SLURM launchers and hardened rollout DP IPC.
 - Runtime hardening for k=5 runs: canonicalized cache guard for HOME, prefill-only builds skip retaining rollout token IDs, and explicit `--probe-preset` is required when a checkpoint lacks `probe_config`.
+- Aggregation now reselects from `metrics.jsonl` whenever selection/tie-breaker differ or cannot be inferred, preventing stale default summaries.
+- RFM training now falls back to a best-row selection when all ranking metrics are NaN.
+- Completion-view prompt+rollout merges are now built per batch to reduce host RAM pressure.
 
 ## Recommended Next Step (when resumed)
 Now that the k=5 three-view ablation is complete, decide whether to:
