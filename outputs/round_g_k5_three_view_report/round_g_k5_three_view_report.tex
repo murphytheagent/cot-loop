@@ -1,0 +1,162 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{hyperref}
+
+\title{Round G Report: k=5 Three-View Dataset + Posterior-First Ablation}
+\author{}
+\date{2026-03-05 21:55 UTC}
+
+\begin{document}
+\maketitle
+
+\section*{Scope (Round G Only)}
+This report covers the single round named ``Round G: k=5 Three-View Dataset + Posterior-First Ablation.''
+It documents the full experiment setup, dataset construction, predictor architecture, evaluation metrics,
+ablated factors, and the resulting metrics for this round only.
+
+\section*{Goal and Label Definition}
+The goal is to predict whether a prompt will produce a looping chain-of-thought trajectory.
+A rollout is labeled positive (``looping'') if it contains a repeated $n$-gram of length $n=30$
+that repeats at least $k=5$ times. The classifier is trained to predict this label from activation
+features extracted either before generation (prefill) or after generation (rollout completion).
+
+\section*{Experiment Setup and Parameters}
+\subsection*{Base Model and Rollout Settings}
+\begin{itemize}
+  \item Model preset: \texttt{openthinker3\_1p5b} (model id \texttt{open-thoughts/OpenThinker3-1.5B}).
+  \item Temperature: 0.0 (deterministic decoding).
+  \item Maximum generated tokens per rollout: 15{,}000.
+  \item Maximum model length: 32{,}768.
+  \item Parallelism: tensor parallel = 1, data parallel = 8 (8-way data parallel decoding).
+  \item Maximum concurrent sequences during rollout: 4.
+  \item Prefill feature extraction batch size: 16.
+  \item Rollout-completion feature extraction batch size: 1.
+\end{itemize}
+
+\subsection*{Three-View Feature Construction}
+Three activation views are built from the same labeled rollouts:
+\begin{itemize}
+  \item \textbf{Posterior (rollout completion) mean}: last-token hidden states from all layers,
+  aggregated by mean across layers. Feature key: \texttt{rollout\_lasttok\_layers\_mean}.
+  \item \textbf{Prefill mean}: last-token hidden states from all layers in the prefill pass,
+  aggregated by mean across layers. Feature key: \texttt{prefill\_lasttok\_layers\_mean}.
+  \item \textbf{Prefill concat}: last-token hidden states from all layers in the prefill pass,
+  concatenated across layers. Feature key: \texttt{prefill\_lasttok\_layers\_concat}.
+\end{itemize}
+The posterior view is used for the preemptive ``posterior-first'' ablation, followed by prefill ablations.
+
+\section*{Dataset Construction Details}
+\subsection*{Training Pool}
+The training prompt pool is assembled from three sources and deduplicated by exact prompt text
+after shuffling with seed 0:
+\begin{itemize}
+  \item \texttt{SuperSecureHuman/competition\_math\_hf\_dataset} (train split, first 7{,}500 rows).
+  \item \texttt{open-r1/OpenR1-Math-220k} (train split, first 16{,}000 rows).
+  \item \texttt{openai/gsm8k} (train split, first 6{,}000 rows; GSM8K = Grade School Math 8K).
+\end{itemize}
+
+\subsection*{Evaluation Pool}
+The evaluation pool uses a natural (unbalanced) distribution from:
+\begin{itemize}
+  \item \texttt{HuggingFaceH4/MATH-500} test split (500 problems), and
+  \item Local AIME 2024/2025 set (AIME = American Invitational Mathematics Examination).
+\end{itemize}
+
+\subsection*{Sampling and Balancing}
+\begin{itemize}
+  \item Train cap: at most 5{,}000 prompts before labeling.
+  \item Train balancing: downsample to class-balance after labeling.
+  \item Test balancing: none (natural distribution).
+  \item Seed for splitting/balancing: 0.
+\end{itemize}
+
+\subsection*{Final Dataset Sizes}
+\begin{itemize}
+  \item Train: 3{,}326 total (1{,}663 positive / 1{,}663 negative).
+  \item Test: 560 total with 115 positives (prevalence 0.2054).
+  \item Input dimensions: 1{,}536 for mean-pooled views, 43{,}008 for concatenated view.
+\end{itemize}
+
+\section*{Predictor Architecture and Training}
+\subsection*{Model}
+A multi-layer perceptron (MLP) classifier is used:
+\begin{itemize}
+  \item Each hidden layer: Linear $\rightarrow$ GELU $\rightarrow$ Dropout.
+  \item Final layer: Linear $\rightarrow$ single logit (binary classification).
+  \item Loss: weighted binary cross-entropy with logits; positive weight = (\#negative / \#positive).
+  \item Optimizer: AdamW.
+\end{itemize}
+
+\subsection*{Ablated Hyperparameters}
+\begin{itemize}
+  \item Feature view: posterior vs prefill mean vs prefill concatenation.
+  \item MLP hidden dimension: 128, 256, or 512.
+  \item MLP depth: 1 or 2 hidden layers.
+  \item Learning rate, weight decay, batch size (varied per run).
+\end{itemize}
+
+\section*{Ablation Matrix (Round G)}
+\begin{center}
+{\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}p{3.1cm}p{4.2cm}rrrr@{}}
+\toprule
+Run tag & Feature view & Hidden dim & Depth & LR & Batch size \\
+\midrule
+completion mean h128 d1 & Posterior mean (all layers) & 128 & 1 & $1\times10^{-4}$ & 256 \\
+completion mean h256 d2 & Posterior mean (all layers) & 256 & 2 & $8\times10^{-5}$ & 256 \\
+prefill mean h256 d2 & Prefill mean (all layers) & 256 & 2 & $1\times10^{-4}$ & 256 \\
+prefill concat h512 d2 & Prefill concat (all layers) & 512 & 2 & $1\times10^{-4}$ & 64 \\
+\bottomrule
+\end{tabular}
+}
+\end{center}
+Common settings across all runs: 15 epochs, dropout 0.1, seeds {0, 1, 2},
+selection metric = macro-F1 with positive-class F1 as tie-breaker.
+
+\section*{Metrics and Definitions}
+\begin{itemize}
+  \item \textbf{Accuracy}: fraction of correct predictions.
+  \item \textbf{Macro-F1}: average of F1 scores for the positive and negative classes (equal weight).
+  \item \textbf{ROC-AUC}: area under the receiver operating characteristic curve (threshold-free ranking quality).
+  \item \textbf{PR-AUC}: area under the precision-recall curve (more informative under class imbalance).
+  \item \textbf{Positive precision}: fraction of predicted positives that are true positives.
+  \item \textbf{Positive recall}: fraction of true positives that are recovered.
+  \item \textbf{Positive F1}: harmonic mean of positive precision and positive recall.
+  \item \textbf{Prevalence}: fraction of positives in the evaluation set.
+\end{itemize}
+All reported metrics are mean $\pm$ standard deviation over three random seeds.
+
+\section*{Results}
+\begin{center}
+{\small
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}p{3.1cm}rrrrr@{}}
+\toprule
+Run tag & Accuracy & Macro-F1 & ROC-AUC & PR-AUC & Positive F1 \\
+\midrule
+completion mean h128 d1 & 0.8643 $\pm$ 0.0031 & 0.8013 $\pm$ 0.0052 & 0.9222 $\pm$ 0.0023 & 0.8055 $\pm$ 0.0025 & 0.6893 $\pm$ 0.0086 \\
+completion mean h256 d2 & 0.8637 $\pm$ 0.0037 & 0.8040 $\pm$ 0.0048 & 0.9234 $\pm$ 0.0008 & 0.8109 $\pm$ 0.0006 & 0.6959 $\pm$ 0.0071 \\
+prefill mean h256 d2 & 0.7762 $\pm$ 0.0037 & 0.6548 $\pm$ 0.0076 & 0.7360 $\pm$ 0.0033 & 0.4365 $\pm$ 0.0092 & 0.4501 $\pm$ 0.0153 \\
+prefill concat h512 d2 & 0.7583 $\pm$ 0.0258 & 0.6641 $\pm$ 0.0172 & 0.7520 $\pm$ 0.0017 & 0.4737 $\pm$ 0.0042 & 0.4866 $\pm$ 0.0160 \\
+\bottomrule
+\end{tabular}
+}
+\end{center}
+
+\section*{Key Findings (Round G)}
+\begin{itemize}
+  \item Posterior (rollout-completion) features substantially outperform prefill features across macro-F1 and PR-AUC,
+  indicating that completion-side information is much more predictive of looping under this setup.
+  \item Increasing MLP capacity on the posterior view (hidden 128\,$\rightarrow$\,256 and depth 1\,$\rightarrow$\,2)
+  yields a small but consistent improvement in macro-F1 and PR-AUC.
+  \item Prefill concatenation yields slightly higher PR-AUC and positive F1 than prefill mean,
+  but both prefill variants remain well below posterior performance.
+  \item With test prevalence 0.2054, accuracy is secondary; macro-F1 and PR-AUC better capture performance
+  under the observed class imbalance.
+\end{itemize}
+
+\end{document}
