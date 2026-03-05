@@ -692,7 +692,8 @@ def _label_split(
     seed: int,
     loop_n: int,
     loop_k: int,
-) -> tuple[list[int], list[list[int]]]:
+    return_rollout_token_ids: bool = True,
+) -> tuple[list[int], list[list[int]] | None]:
     print(f"[{split_name}] running rollouts for {len(prompts)} prompts", flush=True)
     rollout_token_ids = generate_rollout_token_ids(
         prompts,
@@ -704,6 +705,8 @@ def _label_split(
         loop_n=loop_n,
         loop_k=loop_k,
     )
+    if not return_rollout_token_ids:
+        return labels, None
     return labels, rollout_token_ids
 
 
@@ -973,6 +976,7 @@ def main() -> None:
     train_prompts = _prompts(train_records)
     test_prompts = _prompts(test_records)
     all_prompts = train_prompts + test_prompts
+    need_rollout_tokens = bool(completion_feature_views)
     all_labels, all_rollout_token_ids = _label_split(
         "all",
         all_prompts,
@@ -980,14 +984,19 @@ def main() -> None:
         seed=args.seed,
         loop_n=args.loop_n,
         loop_k=args.loop_k,
+        return_rollout_token_ids=need_rollout_tokens,
     )
     split_at = len(train_prompts)
     train_labels = all_labels[:split_at]
     test_labels = all_labels[split_at:]
-    train_rollout_token_ids = all_rollout_token_ids[:split_at]
-    test_rollout_token_ids = all_rollout_token_ids[split_at:]
 
     if completion_feature_views:
+        if all_rollout_token_ids is None:
+            raise RuntimeError(
+                "Completion views requested but rollout token IDs were not retained."
+            )
+        train_rollout_token_ids = all_rollout_token_ids[:split_at]
+        test_rollout_token_ids = all_rollout_token_ids[split_at:]
         completion_model, completion_tokenizer, completion_device = (
             load_prefill_model_and_tokenizer(
                 rollout_cfg.model_id,
@@ -1018,6 +1027,10 @@ def main() -> None:
         )
         train_features_by_key.update(train_completion_features_by_key)
         test_features_by_key.update(test_completion_features_by_key)
+
+        del train_rollout_token_ids
+        del test_rollout_token_ids
+        del all_rollout_token_ids
 
         del completion_model
         del completion_tokenizer

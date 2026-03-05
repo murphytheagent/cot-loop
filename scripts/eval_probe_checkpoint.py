@@ -76,6 +76,10 @@ def _probe_cfg_from_checkpoint(
         )
 
     try:
+        if probe_preset is None:
+            raise SystemExit(
+                "Checkpoint has no probe_config payload; pass --probe-preset explicitly."
+            )
         return get_probe_config(probe_preset)
     except ValueError as exc:
         raise SystemExit(
