@@ -17,7 +17,7 @@ SRC = os.path.join(ROOT, "src")
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
-from loop_probe.dataloader import ActivationDataset
+from loop_probe.dataloader import ActivationDataset, read_manifest
 from loop_probe.train_utils import evaluate_binary_metrics
 
 
@@ -100,11 +100,13 @@ def main() -> None:
     grad_weight = float(payload.get("grad_weight", 1.0))
     grad_scale = float(np.sqrt(max(grad_weight, 0.0)))
     checkpoint_feature_key = payload.get("feature_key")
+    manifest = read_manifest(args.data_dir)
     resolved_feature_key = args.feature_key
     if (
         (resolved_feature_key is None or resolved_feature_key == "")
         and isinstance(checkpoint_feature_key, str)
         and checkpoint_feature_key
+        and isinstance(manifest.get("feature_views"), dict)
     ):
         resolved_feature_key = checkpoint_feature_key
 

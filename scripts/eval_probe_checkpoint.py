@@ -114,15 +114,16 @@ def main() -> None:
         raise SystemExit(f"Checkpoint payload missing state_dict: {args.checkpoint}")
 
     checkpoint_feature_key = payload.get("feature_key")
+    manifest = read_manifest(args.data_dir)
     resolved_feature_key_arg = args.feature_key
     if (
         (resolved_feature_key_arg is None or resolved_feature_key_arg == "")
         and isinstance(checkpoint_feature_key, str)
         and checkpoint_feature_key
+        and isinstance(manifest.get("feature_views"), dict)
     ):
         resolved_feature_key_arg = checkpoint_feature_key
 
-    manifest = read_manifest(args.data_dir)
     split_info, resolved_feature_key = resolve_split_info(
         manifest,
         split=args.split,

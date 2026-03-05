@@ -21,6 +21,7 @@ SUMMARY_METRICS = (
     "positive_f1",
     "prevalence",
 )
+DEFAULT_SELECTION = ("roc_auc", "macro_f1")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -115,28 +116,7 @@ def _infer_seed(run_dir: str, row: dict[str, object]) -> int | None:
     return None
 
 
-def _load_best_row(
-    run_dir: str,
-    *,
-    selection_metric: str,
-    tie_breaker: str,
-) -> dict[str, object]:
-    best_metrics_path = os.path.join(run_dir, "best_metrics.json")
-    if os.path.exists(best_metrics_path):
-        with open(best_metrics_path, "r", encoding="utf-8") as f:
-            row = json.load(f)
-    else:
-        metrics_jsonl = os.path.join(run_dir, "metrics.jsonl")
-        if not os.path.exists(metrics_jsonl):
-            raise SystemExit(
-                f"Missing both best_metrics.json and metrics.jsonl under {run_dir}"
-            )
-        row = _best_row_from_jsonl(
-            metrics_jsonl,
-            selection_metric=selection_metric,
-            tie_breaker=tie_breaker,
-        )
-
+def _format_row(run_dir: str, row: dict[str, object]) -> dict[str, object]:
     return {
         "run_dir": run_dir,
         "seed": _infer_seed(run_dir, row),
@@ -151,6 +131,38 @@ def _load_best_row(
         "positive_f1": _as_float_or_nan(row.get("positive_f1")),
         "prevalence": _as_float_or_nan(row.get("prevalence")),
     }
+
+
+def _load_best_row(
+    run_dir: str,
+    *,
+    selection_metric: str,
+    tie_breaker: str,
+) -> dict[str, object]:
+    best_metrics_path = os.path.join(run_dir, "best_metrics.json")
+    metrics_jsonl = os.path.join(run_dir, "metrics.jsonl")
+    if os.path.exists(metrics_jsonl) and (selection_metric, tie_breaker) != DEFAULT_SELECTION:
+        row = _best_row_from_jsonl(
+            metrics_jsonl,
+            selection_metric=selection_metric,
+            tie_breaker=tie_breaker,
+        )
+        return _format_row(run_dir, row)
+    if os.path.exists(best_metrics_path):
+        with open(best_metrics_path, "r", encoding="utf-8") as f:
+            row = json.load(f)
+    else:
+        if not os.path.exists(metrics_jsonl):
+            raise SystemExit(
+                f"Missing both best_metrics.json and metrics.jsonl under {run_dir}"
+            )
+        row = _best_row_from_jsonl(
+            metrics_jsonl,
+            selection_metric=selection_metric,
+            tie_breaker=tie_breaker,
+        )
+
+    return _format_row(run_dir, row)
 
 
 def _aggregate(rows: list[dict[str, object]], metric: str) -> dict[str, object]:
