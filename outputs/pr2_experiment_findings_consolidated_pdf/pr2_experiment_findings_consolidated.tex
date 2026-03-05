@@ -6,13 +6,13 @@
 \usepackage{longtable}
 \title{CoT Loop Detection PR \#2\\Consolidated Experiment Results}
 \author{}
-\date{2026-03-05 17:56 UTC}
+\date{2026-03-05 18:16 UTC}
 
 \begin{document}
 \maketitle
 
 \section*{Scope}
-This document consolidates the completed experiment results and findings for PR \#2 in \texttt{cot-loop}. Scope covered: 2026-03-01 19:00 UTC through 2026-03-05 17:56 UTC.
+This document consolidates the completed experiment results and findings for PR \#2 in \texttt{cot-loop}. Scope covered: 2026-03-01 19:00 UTC through 2026-03-05 18:16 UTC.
 
 \section*{Fixed Setup Used for Main Comparisons}
 \begin{itemize}
@@ -233,6 +233,7 @@ Key finding: posterior (completion) features are materially stronger than prefil
   \item Aggregation now reselects from \texttt{metrics.jsonl} whenever selection/tie-breaker differ or cannot be inferred, preventing stale default summaries.
   \item RFM training now falls back to a best-row selection when all ranking metrics are NaN.
   \item Completion-view prompt+rollout merges are now built per batch to reduce host RAM pressure.
+  \item Completion-view prompts are tokenized per batch (aligned with \texttt{--completion-batch-size}) to avoid full-split materialization and OOM.
 \end{itemize}
 
 \section*{Recommended Next Step}

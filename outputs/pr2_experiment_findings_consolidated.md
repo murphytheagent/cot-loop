@@ -1,7 +1,7 @@
 # CoT Loop Detection PR #2: Consolidated Experiments and Findings
 
-Last updated: 2026-03-05 17:56 UTC
-Scope covered: 2026-03-01 19:00 UTC through 2026-03-05 17:56 UTC
+Last updated: 2026-03-05 18:16 UTC
+Scope covered: 2026-03-01 19:00 UTC through 2026-03-05 18:16 UTC
 PR: https://github.com/Zhi0467/cot-loop/pull/2
 
 ## Goal
@@ -114,6 +114,7 @@ Implemented in PR #2 branch (`task/1772391564-ood-feature-ablation`):
 - Aggregation now reselects from `metrics.jsonl` whenever selection/tie-breaker differ or cannot be inferred, preventing stale default summaries.
 - RFM training now falls back to a best-row selection when all ranking metrics are NaN.
 - Completion-view prompt+rollout merges are now built per batch to reduce host RAM pressure.
+- Completion-view prompts are tokenized per batch (aligned with `--completion-batch-size`) to avoid full-split materialization and OOM.
 
 ## Recommended Next Step (when resumed)
 Now that the k=5 three-view ablation is complete, decide whether to:
