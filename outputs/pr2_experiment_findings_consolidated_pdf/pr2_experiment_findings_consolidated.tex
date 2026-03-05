@@ -6,13 +6,13 @@
 \usepackage{longtable}
 \title{CoT Loop Detection PR \#2\\Consolidated Experiment Results}
 \author{}
-\date{2026-03-05 17:18 UTC}
+\date{2026-03-05 17:56 UTC}
 
 \begin{document}
 \maketitle
 
 \section*{Scope}
-This document consolidates the completed experiment results and findings for PR \#2 in \texttt{cot-loop}. Scope covered: 2026-03-01 19:00 UTC through 2026-03-05 17:18 UTC.
+This document consolidates the completed experiment results and findings for PR \#2 in \texttt{cot-loop}. Scope covered: 2026-03-01 19:00 UTC through 2026-03-05 17:56 UTC.
 
 \section*{Fixed Setup Used for Main Comparisons}
 \begin{itemize}
@@ -167,6 +167,19 @@ completion\_mean\_h256\_d2 & 0.8631$\pm$0.0045 & 0.8048$\pm$0.0045 & 0.9211$\pm$
 \end{center}
 
 \noindent
+Posterior positive-class metrics (mean$\pm$std):
+\begin{center}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Run & Pos-Prec & Pos-Rec & Pos-F1 \\
+\midrule
+completion\_mean\_h128\_d1 & 0.6545$\pm$0.0017 & 0.7304$\pm$0.0151 & 0.6904$\pm$0.0076 \\
+completion\_mean\_h256\_d2 & 0.6381$\pm$0.0127 & 0.7710$\pm$0.0050 & 0.6982$\pm$0.0057 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
 Prefill view results, n=3 seeds (mean$\pm$std):
 \begin{center}
 \begin{tabular}{@{}lrrrr@{}}
@@ -180,7 +193,20 @@ prefill\_layers\_concat\_h512\_d2 & 0.7786$\pm$0.0064 & 0.6768$\pm$0.0043 & 0.75
 \end{center}
 
 \noindent
-Key finding: posterior (completion) features are materially stronger than prefill views under the same labels; prefill concat improves recall but still lags on macro-F1/PR-AUC.
+Prefill positive-class metrics (mean$\pm$std):
+\begin{center}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Run & Pos-Prec & Pos-Rec & Pos-F1 \\
+\midrule
+prefill\_layers\_mean\_h256\_d2 & 0.4576$\pm$0.0042 & 0.4986$\pm$0.0181 & 0.4770$\pm$0.0061 \\
+prefill\_layers\_concat\_h512\_d2 & 0.4663$\pm$0.0104 & 0.5304$\pm$0.0398 & 0.4955$\pm$0.0129 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Key finding: posterior (completion) features are materially stronger than prefill views under the same labels; prefill concat lifts recall but still lags on macro-F1/PR-AUC.
 \newline
 \noindent\textit{Note: metrics recomputed using macro-F1/positive-F1 checkpoint selection after fixing the aggregation selection logic.}
 
@@ -190,7 +216,7 @@ Key finding: posterior (completion) features are materially stronger than prefil
   \item ROC-AUC should be retained but never alone under imbalance; PR-AUC and positive-class metrics are required.
   \item Earlier ID--OOD deltas were confounded by sparse positives; matched-label datasets are required for fair view comparisons.
   \item Final-layer views are close on ROC-AUC; \texttt{last\_token\_final} is more stable on macro-F1 while \texttt{mean\_pool\_final} can lift PR-AUC.
-  \item In the k=5 three-view study, posterior (completion) features yield strong macro-F1 ($\sim$0.80), while prefill views sit around $\sim$0.67.
+  \item In the k=5 three-view study, posterior (completion) features yield strong macro-F1 ($\sim$0.80), while prefill views sit around $\sim$0.67 with positive precision/recall in the $\sim$0.46--0.53 range.
   \item OOD performance remains the bottleneck under current labels; gains likely need data/label improvements before larger models.
 \end{itemize}
 

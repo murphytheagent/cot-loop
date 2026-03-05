@@ -1,7 +1,7 @@
 # CoT Loop Detection PR #2: Consolidated Experiments and Findings
 
-Last updated: 2026-03-05 17:18 UTC
-Scope covered: 2026-03-01 19:00 UTC through 2026-03-05 17:18 UTC
+Last updated: 2026-03-05 17:56 UTC
+Scope covered: 2026-03-01 19:00 UTC through 2026-03-05 17:56 UTC
 PR: https://github.com/Zhi0467/cot-loop/pull/2
 
 ## Goal
@@ -82,11 +82,11 @@ Predict whether a (model, prompt) pair will enter a loop (n=30-gram repeating >=
   - `811` (dataset build, 8 GPU) completed at 2026-03-05 16:11 UTC.
   - `812` (dependent ablation sweep) completed at 2026-03-05 16:15 UTC.
 - Posterior (rollout completion) results, n=3 seeds (mean +/- std):
-  - `completion_mean_h128_d1`: accuracy `0.8655 +/- 0.0021`, macro-F1 `0.8022 +/- 0.0044`, ROC-AUC `0.9219 +/- 0.0026`, PR-AUC `0.8045 +/- 0.0030`, positive F1 `0.6904 +/- 0.0076`.
-  - `completion_mean_h256_d2`: accuracy `0.8631 +/- 0.0045`, macro-F1 `0.8048 +/- 0.0045`, ROC-AUC `0.9211 +/- 0.0035`, PR-AUC `0.8057 +/- 0.0071`, positive F1 `0.6982 +/- 0.0057`.
+  - `completion_mean_h128_d1`: accuracy `0.8655 +/- 0.0021`, macro-F1 `0.8022 +/- 0.0044`, ROC-AUC `0.9219 +/- 0.0026`, PR-AUC `0.8045 +/- 0.0030`, positive precision `0.6545 +/- 0.0017`, positive recall `0.7304 +/- 0.0151`, positive F1 `0.6904 +/- 0.0076`.
+  - `completion_mean_h256_d2`: accuracy `0.8631 +/- 0.0045`, macro-F1 `0.8048 +/- 0.0045`, ROC-AUC `0.9211 +/- 0.0035`, PR-AUC `0.8057 +/- 0.0071`, positive precision `0.6381 +/- 0.0127`, positive recall `0.7710 +/- 0.0050`, positive F1 `0.6982 +/- 0.0057`.
 - Prefill results, n=3 seeds (mean +/- std):
-  - `prefill_layers_mean_h256_d2`: accuracy `0.7756 +/- 0.0027`, macro-F1 `0.6671 +/- 0.0017`, ROC-AUC `0.7332 +/- 0.0010`, PR-AUC `0.4292 +/- 0.0014`, positive F1 `0.4770 +/- 0.0061`.
-  - `prefill_layers_concat_h512_d2`: accuracy `0.7786 +/- 0.0064`, macro-F1 `0.6768 +/- 0.0043`, ROC-AUC `0.7503 +/- 0.0031`, PR-AUC `0.4607 +/- 0.0085`, positive F1 `0.4955 +/- 0.0129`.
+  - `prefill_layers_mean_h256_d2`: accuracy `0.7756 +/- 0.0027`, macro-F1 `0.6671 +/- 0.0017`, ROC-AUC `0.7332 +/- 0.0010`, PR-AUC `0.4292 +/- 0.0014`, positive precision `0.4576 +/- 0.0042`, positive recall `0.4986 +/- 0.0181`, positive F1 `0.4770 +/- 0.0061`.
+  - `prefill_layers_concat_h512_d2`: accuracy `0.7786 +/- 0.0064`, macro-F1 `0.6768 +/- 0.0043`, ROC-AUC `0.7503 +/- 0.0031`, PR-AUC `0.4607 +/- 0.0085`, positive precision `0.4663 +/- 0.0104`, positive recall `0.5304 +/- 0.0398`, positive F1 `0.4955 +/- 0.0129`.
 - Finding: posterior (completion) features are materially stronger than prefill views under the same labels; prefill concat improves recall but still lags on macro-F1/PR-AUC.
 - Note: these numbers are recomputed using macro-F1/positive-F1 checkpoint selection (instead of the training default ROC-AUC selection), after fixing the aggregation selection logic.
 
@@ -96,7 +96,7 @@ Predict whether a (model, prompt) pair will enter a loop (n=30-gram repeating >=
 3. The earlier `last_token_final` ID-OOD delta (`-0.1151`) is not strong evidence of inversion because ID had very few positives and high variance.
 4. Shared-label multi-view datasets are necessary for fair feature comparisons; they removed per-feature label drift in later runs.
 5. Final-layer feature comparison is close on AUC; `last_token_final` has better stability/macro-F1, `mean_pool_final` can improve PR-AUC in some matched-label settings.
-6. In the k=5 three-view study, posterior (rollout completion) features yield strong macro-F1 (~0.80), while prefill views sit around ~0.67, indicating prefill-stage prediction is still substantially harder under the current setup.
+6. In the k=5 three-view study, posterior (rollout completion) features yield strong macro-F1 (~0.80), while prefill views sit around ~0.67 with positive precision/recall roughly 0.46-0.53, indicating prefill-stage prediction is still substantially harder under the current setup.
 7. On current datasets, OOD performance remains the bottleneck; further gains likely require data/label quality improvements before architecture scaling alone.
 
 ## Current PR2 Codebase State
