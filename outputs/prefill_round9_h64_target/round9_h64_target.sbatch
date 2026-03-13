@@ -17,6 +17,7 @@ export TORCH_HOME=/data/scratch/murphy/cache/torch
 export XDG_CACHE_HOME=/data/scratch/murphy/cache
 export PIP_CACHE_DIR=/data/scratch/murphy/cache/pip
 export WANDB_MODE=offline
+export VLLM_GPU_MEMORY_UTILIZATION=0.20
 
 PYTHON_BIN=/home/murphy/miniforge3/envs/swe311/bin/python
 REPO_ROOT=/home/murphy/projects/worktrees/cot-loop-detection-runtime
@@ -56,6 +57,8 @@ common_build_args=(
   --tp 1
   --dp 1
   --max-tokens 64
+  --max-num-seqs 16
+  --max-num-batched-tokens 8192
   --prefill-batch-size 2
   --label-target loop_by_horizon
   --label-horizon 64

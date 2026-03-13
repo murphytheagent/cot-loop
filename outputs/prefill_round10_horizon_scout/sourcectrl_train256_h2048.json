@@ -1,0 +1,80 @@
+{
+  "dataset": "/data/scratch/murphy/outputs/cot-loop-detection/probe_data/prefill_round9_horizon_prompt_subsets/sourcectrl/train.jsonl",
+  "eventual_loop_within_max_tokens": {
+    "num_negative": 255,
+    "num_positive": 1,
+    "prevalence": 0.00390625
+  },
+  "first_hit_summary": {
+    "max": 1423,
+    "median": 1423,
+    "min": 1423,
+    "p25": 1423,
+    "p75": 1423,
+    "p90": 1423
+  },
+  "horizons": [
+    64,
+    128,
+    256,
+    512,
+    1024,
+    2048
+  ],
+  "loop_detector": {
+    "k": 20,
+    "n": 30
+  },
+  "num_length_bins": 3,
+  "prevalence": {
+    "1024": {
+      "num_negative": 256,
+      "num_positive": 0,
+      "prevalence": 0.0
+    },
+    "128": {
+      "num_negative": 256,
+      "num_positive": 0,
+      "prevalence": 0.0
+    },
+    "2048": {
+      "num_negative": 255,
+      "num_positive": 1,
+      "prevalence": 0.00390625
+    },
+    "256": {
+      "num_negative": 256,
+      "num_positive": 0,
+      "prevalence": 0.0
+    },
+    "512": {
+      "num_negative": 256,
+      "num_positive": 0,
+      "prevalence": 0.0
+    },
+    "64": {
+      "num_negative": 256,
+      "num_positive": 0,
+      "prevalence": 0.0
+    }
+  },
+  "prompt_field": "problem",
+  "rollout_config": {
+    "dp": 1,
+    "dtype": "bfloat16",
+    "max_model_len": 32768,
+    "max_num_batched_tokens": 8192,
+    "max_num_seqs": 16,
+    "max_tokens": 2048,
+    "model_id": "open-thoughts/OpenThinker3-1.5B",
+    "temperature": 0.0,
+    "tp": 1,
+    "trust_remote_code": true
+  },
+  "sample_seed": 0,
+  "sample_size": 256,
+  "sources": {
+    "SuperSecureHuman/competition_math_hf_dataset": 51,
+    "open-r1/OpenR1-Math-220k": 205
+  }
+}
