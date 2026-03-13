@@ -9,12 +9,20 @@ LAST_TOKEN_POOLING = "last_token"
 MEAN_POOLING = "mean_pool"
 LAST_TOKEN_ALL_LAYERS_MEAN = "last_token_all_layers_mean"
 LAST_TOKEN_ALL_LAYERS_CONCAT = "last_token_all_layers_concat"
+LAST16_ALL_LAYERS_CONCAT = "last16_all_layers_concat"
+LAST8_PREV8_DELTA_ALL_LAYERS_CONCAT = "last8_prev8_delta_all_layers_concat"
+LAST16_MID16_DELTA_ALL_LAYERS_CONCAT = "last16_mid16_delta_all_layers_concat"
+LAST16_PLUS_DELTA8_ALL_LAYERS_CONCAT = "last16_plus_delta8_all_layers_concat"
 
 FEATURE_POOLING_CHOICES = (
     LAST_TOKEN_POOLING,
     MEAN_POOLING,
     LAST_TOKEN_ALL_LAYERS_MEAN,
     LAST_TOKEN_ALL_LAYERS_CONCAT,
+    LAST16_ALL_LAYERS_CONCAT,
+    LAST8_PREV8_DELTA_ALL_LAYERS_CONCAT,
+    LAST16_MID16_DELTA_ALL_LAYERS_CONCAT,
+    LAST16_PLUS_DELTA8_ALL_LAYERS_CONCAT,
 )
 
 
@@ -137,6 +145,134 @@ def _pool_hidden_states(
     )
 
 
+def _suffix_mean_vec(hidden_row: torch.Tensor, length: int, window: int) -> torch.Tensor:
+    width = min(window, length)
+    start = length - width
+    return hidden_row[start:length].mean(dim=0)
+
+
+def _prev_suffix_delta_vec(
+    hidden_row: torch.Tensor,
+    *,
+    length: int,
+    last_window: int,
+    prev_window: int,
+) -> torch.Tensor:
+    last_vec = _suffix_mean_vec(hidden_row, length, last_window)
+    last_width = min(last_window, length)
+    prev_end = length - last_width
+    prev_width = min(prev_window, prev_end)
+    if prev_width < 1:
+        return last_vec.new_zeros(last_vec.shape)
+    prev_start = prev_end - prev_width
+    prev_vec = hidden_row[prev_start:prev_end].mean(dim=0)
+    return last_vec - prev_vec
+
+
+def _middle_window_vec(hidden_row: torch.Tensor, *, length: int, window: int) -> torch.Tensor:
+    width = min(window, length)
+    start = max(min((length // 2) - (width // 2), length - width), 0)
+    end = start + width
+    return hidden_row[start:end].mean(dim=0)
+
+
+def _pool_window_summary(
+    hidden: torch.Tensor,
+    *,
+    pooling: str,
+    attention_mask: torch.Tensor | None,
+) -> torch.Tensor:
+    batch_size, seq_len, _ = hidden.shape
+    if attention_mask is None:
+        lengths = [seq_len] * batch_size
+    else:
+        lengths = [max(int(v), 1) for v in attention_mask.sum(dim=1).tolist()]
+
+    outputs = []
+    for hidden_row, length in zip(hidden, lengths, strict=True):
+        if pooling == LAST16_ALL_LAYERS_CONCAT:
+            outputs.append(_suffix_mean_vec(hidden_row, length, 16))
+        elif pooling == LAST8_PREV8_DELTA_ALL_LAYERS_CONCAT:
+            outputs.append(
+                _prev_suffix_delta_vec(
+                    hidden_row,
+                    length=length,
+                    last_window=8,
+                    prev_window=8,
+                )
+            )
+        elif pooling == LAST16_MID16_DELTA_ALL_LAYERS_CONCAT:
+            outputs.append(
+                _suffix_mean_vec(hidden_row, length, 16)
+                - _middle_window_vec(hidden_row, length=length, window=16)
+            )
+        elif pooling == LAST16_PLUS_DELTA8_ALL_LAYERS_CONCAT:
+            outputs.append(
+                torch.cat(
+                    [
+                        _suffix_mean_vec(hidden_row, length, 16),
+                        _prev_suffix_delta_vec(
+                            hidden_row,
+                            length=length,
+                            last_window=8,
+                            prev_window=8,
+                        ),
+                    ],
+                    dim=0,
+                )
+            )
+        else:
+            raise SystemExit(
+                f"Unknown windowed pooling '{pooling}'. "
+                f"Valid: {FEATURE_POOLING_CHOICES}"
+            )
+    return torch.stack(outputs, dim=0).float().cpu()
+
+
+def _pool_all_layers(
+    hidden_states: tuple[torch.Tensor, ...],
+    *,
+    pooling: str,
+    attention_mask: torch.Tensor | None,
+) -> torch.Tensor:
+    if len(hidden_states) <= 1:
+        raise RuntimeError("Model returned no transformer hidden layers.")
+
+    per_layer = []
+    for hidden in hidden_states[1:]:
+        if pooling in (LAST_TOKEN_ALL_LAYERS_MEAN, LAST_TOKEN_ALL_LAYERS_CONCAT):
+            per_layer.append(
+                _pool_hidden_states(
+                    hidden,
+                    pooling=LAST_TOKEN_POOLING,
+                    attention_mask=attention_mask,
+                )
+            )
+        else:
+            per_layer.append(
+                _pool_window_summary(
+                    hidden,
+                    pooling=pooling,
+                    attention_mask=attention_mask,
+                )
+            )
+
+    if pooling == LAST_TOKEN_ALL_LAYERS_MEAN:
+        return torch.stack(per_layer, dim=1).mean(dim=1)
+    if pooling in (
+        LAST_TOKEN_ALL_LAYERS_CONCAT,
+        LAST16_ALL_LAYERS_CONCAT,
+        LAST8_PREV8_DELTA_ALL_LAYERS_CONCAT,
+        LAST16_MID16_DELTA_ALL_LAYERS_CONCAT,
+        LAST16_PLUS_DELTA8_ALL_LAYERS_CONCAT,
+    ):
+        return torch.cat(per_layer, dim=1)
+    raise SystemExit(
+        f"Unknown all-layer pooling '{pooling}'. "
+        f"Valid: {FEATURE_POOLING_CHOICES}"
+    )
+
+
 def extract_prefill_features_multi(
     model,
     tokenizer,
@@ -214,25 +350,6 @@ def extract_prefill_features_multi(
                         resolved_layer = None
                     resolved_view_specs[key] = (pooling, resolved_layer)
 
-            needs_all_layers = any(
-                pooling in (LAST_TOKEN_ALL_LAYERS_MEAN, LAST_TOKEN_ALL_LAYERS_CONCAT)
-                for pooling, _ in resolved_view_specs.values()
-            )
-            all_layer_last_token: list[torch.Tensor] | None = None
-            if needs_all_layers:
-                num_hidden_layers = len(out.hidden_states) - 1
-                last_token_idx = _last_token_idx(
-                    attention_mask=attention_mask,
-                    batch_size=input_ids.size(0),
-                    seq_len=input_ids.size(1),
-                    device=input_ids.device,
-                )
-                batch_idx = torch.arange(input_ids.size(0), device=input_ids.device)
-                all_layer_last_token = []
-                for layer_idx in range(num_hidden_layers):
-                    hidden = out.hidden_states[layer_idx + 1]
-                    all_layer_last_token.append(hidden[batch_idx, last_token_idx])
-
             for key, (pooling, resolved_layer) in resolved_view_specs.items():
                 if pooling in (LAST_TOKEN_POOLING, MEAN_POOLING):
                     if resolved_layer is None:
@@ -245,19 +362,19 @@ def extract_prefill_features_multi(
                         pooling=pooling,
                         attention_mask=attention_mask,
                     )
-                elif pooling == LAST_TOKEN_ALL_LAYERS_MEAN:
-                    if all_layer_last_token is None or not all_layer_last_token:
-                        raise RuntimeError(
-                            "All-layer last-token cache is missing for mean pooling."
-                        )
-                    stacked = torch.stack(all_layer_last_token, dim=1)
-                    batch_vecs = stacked.mean(dim=1).float().cpu()
-                elif pooling == LAST_TOKEN_ALL_LAYERS_CONCAT:
-                    if all_layer_last_token is None or not all_layer_last_token:
-                        raise RuntimeError(
-                            "All-layer last-token cache is missing for concat pooling."
-                        )
-                    batch_vecs = torch.cat(all_layer_last_token, dim=1).float().cpu()
+                elif pooling in (
+                    LAST_TOKEN_ALL_LAYERS_MEAN,
+                    LAST_TOKEN_ALL_LAYERS_CONCAT,
+                    LAST16_ALL_LAYERS_CONCAT,
+                    LAST8_PREV8_DELTA_ALL_LAYERS_CONCAT,
+                    LAST16_MID16_DELTA_ALL_LAYERS_CONCAT,
+                    LAST16_PLUS_DELTA8_ALL_LAYERS_CONCAT,
+                ):
+                    batch_vecs = _pool_all_layers(
+                        out.hidden_states,
+                        pooling=pooling,
+                        attention_mask=attention_mask,
+                    )
                 else:
                     raise SystemExit(
                         f"Unknown feature pooling '{pooling}'. "

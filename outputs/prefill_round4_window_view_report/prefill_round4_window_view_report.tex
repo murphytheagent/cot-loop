@@ -1,0 +1,87 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{hyperref}
+
+\title{Prefill Round 4: Boundary-Aware Prompt Summaries under Metadata-Residual Training}
+\author{}
+\date{2026-03-13 12:55 UTC}
+
+\begin{document}
+\maketitle
+
+\section*{Question}
+Round 3 established that residual prompt-time signal survives a frozen metadata baseline, but the remaining representation was still the original \textbf{all-layer last-token concat} view. The next question was whether a few cheap prompt-wide summaries could improve on that anchor \emph{without} reopening the data-composition question:
+\begin{itemize}
+  \item a last-16-token boundary summary,
+  \item a local boundary-shift summary (last 8 minus previous 8),
+  \item a late-vs-middle drift summary,
+  \item and a small boundary hybrid (last-16 plus local shift).
+\end{itemize}
+
+\section*{Setup}
+I kept the Round 3 evaluation frame fixed and changed only the prefill summary.
+
+\begin{itemize}
+  \item \textbf{Train split}: the Round 2 \textbf{source-control} subset (2{,}096 examples).
+  \item \textbf{Natural test}: the preserved natural eval set (560 examples, 115 positives).
+  \item \textbf{Matched test}: the preserved source/length-matched eval slice (230 examples, 115 positives).
+  \item \textbf{Labels/splits}: fixed from the existing k=5 artifacts; this round re-extracted \emph{prefill features only} on the same sample IDs and did \textbf{no new rollouts}.
+  \item \textbf{Training}: same residual-over-metadata MLP as Round 3 (hidden dim 512, depth 2, dropout 0.03), 3 seeds, same optimizer and same checkpoint-selection rule (natural ROC-AUC with macro-F1 tie-break).
+  \item \textbf{Metadata branch}: the validated legacy control from Round 3,
+  \[
+    \text{source} + \text{prompt length} + \text{newline count} + \text{digit count} + \text{LaTeX-dollar count}.
+  \]
+\end{itemize}
+
+Feature views:
+\begin{itemize}
+  \item \textbf{Anchor}: all-layer last-token concat.
+  \item \textbf{Boundary last-16 mean}: mean over the last 16 prompt tokens in each layer, then concat across layers.
+  \item \textbf{Boundary $\Delta8$}: mean(last 8) $-$ mean(previous 8) in each layer, then concat across layers.
+  \item \textbf{Late-vs-middle drift}: mean(last 16) $-$ mean(middle 16) in each layer, then concat across layers.
+  \item \textbf{Boundary hybrid}: concat of boundary last-16 mean and boundary $\Delta8$ in each layer.
+\end{itemize}
+
+\section*{Main Results}
+\begin{center}
+\small
+\setlength{\tabcolsep}{4pt}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{@{}p{3.1cm}rrrrrr@{}}
+\toprule
+View & Natural PR & Natural ROC & Matched PR & Matched ROC & Matched bin PR & $\Delta$ Matched PR vs anchor \\
+\midrule
+Anchor: last-token concat & 0.4182 $\pm$ 0.0114 & 0.7503 $\pm$ 0.0029 & 0.6416 $\pm$ 0.0167 & 0.6805 $\pm$ 0.0139 & 0.6494 & 0.0000 \\
+Boundary last-16 mean & 0.4125 $\pm$ 0.0012 & 0.7521 $\pm$ 0.0010 & 0.6213 $\pm$ 0.0007 & 0.6648 $\pm$ 0.0022 & 0.6335 & -0.0203 \\
+Boundary $\Delta8$ & 0.4099 $\pm$ 0.0032 & 0.7459 $\pm$ 0.0014 & 0.6253 $\pm$ 0.0036 & 0.6650 $\pm$ 0.0020 & 0.6171 & -0.0163 \\
+Late-vs-middle drift & 0.3702 $\pm$ 0.0029 & 0.7024 $\pm$ 0.0027 & 0.6092 $\pm$ 0.0050 & 0.6326 $\pm$ 0.0097 & 0.6309 & -0.0324 \\
+Boundary hybrid & 0.4114 $\pm$ 0.0032 & 0.7509 $\pm$ 0.0019 & 0.6230 $\pm$ 0.0016 & 0.6666 $\pm$ 0.0017 & 0.6167 & -0.0186 \\
+\bottomrule
+\end{tabular}
+}
+\end{center}
+
+Against the same legacy metadata baseline, the anchor remains the strongest residual model:
+\begin{itemize}
+  \item \textbf{Anchor deltas over metadata}: natural \textbf{+0.0836} PR-AUC / \textbf{+0.0936} ROC-AUC; matched \textbf{+0.0929} PR-AUC / \textbf{+0.1397} ROC-AUC.
+  \item Best alternative on matched PR-AUC is the boundary $\Delta8$ view, but it is still \textbf{-0.0163 PR-AUC} and \textbf{-0.0155 ROC-AUC} below the anchor on the matched test.
+  \item The boundary last-16 mean nearly ties the anchor on \emph{natural} ROC-AUC (+0.0018), but still loses clearly on matched PR-AUC (-0.0203).
+\end{itemize}
+
+\section*{Interpretation}
+\begin{itemize}
+  \item \textbf{Simple token-position pooling does not beat the last-token anchor.} None of the four replacement views improves matched PR-AUC, matched ROC-AUC, or matched within-bin PR-AUC over the existing all-layer last-token concat residual probe.
+  \item \textbf{The failure is not just one bad view.} The boundary last-16 mean, boundary $\Delta8$, and the small hybrid all land in a similar band: respectable residual signal above metadata, but consistently below the anchor on the matched eval.
+  \item \textbf{Late-vs-middle drift is clearly weaker.} It loses substantially on both natural and matched metrics, which suggests that this coarse ``prompt trajectory'' summary mostly throws away useful boundary state rather than adding robust signal.
+  \item \textbf{Round 3's anchor is stable.} Re-extracting the anchor in this new fixed-split multi-view pipeline gives essentially the same regime as Round 3, so the negative result is about the new views, not about pipeline breakage.
+  \item \textbf{This is strong evidence that simple replacement summaries are close to exhausted.} If a better prompt-only summary exists in this metadata-aware regime, it likely needs to \emph{augment} the last-token anchor rather than replace it, or it needs a different training objective.
+\end{itemize}
+
+\section*{Bottom Line}
+Round 4 is a useful negative result. Under the validated metadata-residual training frame, \textbf{the current all-layer last-token concat view remains the best of the tested prompt-time summaries}. Cheap boundary-window pooling and late-vs-middle drift preserve some residual signal above metadata, but they do \emph{not} improve on the anchor. The next compact round should therefore stop looking for a better \emph{replacement} summary and instead test whether these new views only help when \emph{added on top of} the anchor (for example anchor $+$ local boundary shift), or whether the next lever is a modest training-objective change such as within-bin auxiliary ranking.
+
+\end{document}

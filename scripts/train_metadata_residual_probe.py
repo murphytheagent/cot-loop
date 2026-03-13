@@ -193,6 +193,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-pool-jsonl", required=True)
     parser.add_argument("--prompt-field", default="problem")
     parser.add_argument("--feature-key", default=None)
+    parser.add_argument("--extra-feature-key", action="append", default=[])
     parser.add_argument("--tokenizer-model-id", required=True)
     parser.add_argument(
         "--metadata-feature-set",
@@ -470,6 +471,58 @@ def _write_jsonl(path: str, row: dict[str, object]) -> None:
         f.write(json.dumps(row, sort_keys=True) + "\n")
 
 
+def _resolved_feature_keys(
+    manifest: dict[str, object],
+    *,
+    primary_key: str | None,
+    extra_keys: list[str],
+) -> list[str]:
+    keys: list[str] = []
+    if primary_key:
+        keys.append(primary_key)
+    keys.extend(key for key in extra_keys if key)
+    if keys:
+        return keys
+    resolved = resolve_feature_key(manifest, None)
+    if resolved is None:
+        feature_key = manifest.get("feature_key")
+        if isinstance(feature_key, str) and feature_key:
+            return [feature_key]
+        raise SystemExit("Could not resolve default feature key from manifest.")
+    return [resolved]
+
+
+def _load_feature_concat(
+    data_dir: str,
+    split: str,
+    *,
+    feature_keys: list[str],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[str]]:
+    xs = []
+    labels: torch.Tensor | None = None
+    sample_ids: torch.Tensor | None = None
+    resolved_keys: list[str] = []
+    for feature_key in feature_keys:
+        ds = ActivationDataset(data_dir=data_dir, split=split, feature_key=feature_key)
+        if labels is None:
+            labels = ds.y.clone()
+            sample_ids = ds.sample_ids.clone()
+        else:
+            if not torch.equal(ds.y, labels):
+                raise SystemExit(
+                    f"Label mismatch while concatenating feature key '{feature_key}' on split '{split}'."
+                )
+            if sample_ids is None or not torch.equal(ds.sample_ids, sample_ids):
+                raise SystemExit(
+                    f"sample_id mismatch while concatenating feature key '{feature_key}' on split '{split}'."
+                )
+        xs.append(ds.x)
+        resolved_keys.append(ds.feature_key or feature_key)
+    if labels is None or sample_ids is None:
+        raise SystemExit("No feature tensors were loaded.")
+    return torch.cat(xs, dim=1), labels, sample_ids, resolved_keys
+
+
 def _aggregate_rows(rows: list[dict[str, object]]) -> dict[str, dict[str, float]]:
     summary: dict[str, dict[str, float]] = {}
     for metric in SUMMARY_METRICS:
@@ -519,48 +572,59 @@ def main() -> None:
     )
 
     train_manifest = read_manifest(args.train_data_dir)
-    resolved_feature_key = resolve_feature_key(train_manifest, args.feature_key)
-    feature_key = resolved_feature_key or train_manifest.get("feature_key")
-    if not isinstance(feature_key, str) or not feature_key:
-        raise SystemExit("Could not resolve feature key for train dataset.")
-
-    dataset_feature_arg = args.feature_key if args.feature_key else None
-    train_ds = ActivationDataset(args.train_data_dir, "train", feature_key=dataset_feature_arg)
-    natural_ds = ActivationDataset(args.train_data_dir, "test", feature_key=dataset_feature_arg)
+    feature_keys = _resolved_feature_keys(
+        train_manifest,
+        primary_key=args.feature_key,
+        extra_keys=args.extra_feature_key,
+    )
+    train_x, train_y, train_sample_ids, resolved_train_keys = _load_feature_concat(
+        args.train_data_dir,
+        "train",
+        feature_keys=feature_keys,
+    )
+    natural_x, natural_y, natural_sample_ids, resolved_natural_keys = _load_feature_concat(
+        args.train_data_dir,
+        "test",
+        feature_keys=feature_keys,
+    )
     matched_manifest = read_manifest(args.matched_eval_data_dir)
-    matched_feature_key = resolve_feature_key(matched_manifest, args.feature_key)
-    matched_feature_key = matched_feature_key or matched_manifest.get("feature_key")
-    if not isinstance(matched_feature_key, str) or not matched_feature_key:
-        raise SystemExit("Could not resolve feature key for matched eval dataset.")
-    matched_ds = ActivationDataset(
+    matched_feature_keys = _resolved_feature_keys(
+        matched_manifest,
+        primary_key=args.feature_key,
+        extra_keys=args.extra_feature_key,
+    )
+    matched_x, matched_y, matched_sample_ids, resolved_matched_keys = _load_feature_concat(
         args.matched_eval_data_dir,
         "test",
-        feature_key=dataset_feature_arg,
+        feature_keys=matched_feature_keys,
     )
+    if resolved_train_keys != resolved_natural_keys or resolved_train_keys != resolved_matched_keys:
+        raise SystemExit("Resolved feature keys do not match across train/natural/matched datasets.")
+    feature_key = "+".join(resolved_train_keys)
 
     train_pool_rows = _load_jsonl_rows(args.train_pool_jsonl)
     eval_pool_rows = _load_jsonl_rows(args.eval_pool_jsonl)
 
     train_meta_rows = _metadata_rows_from_ids(
         pool_rows=train_pool_rows,
-        sample_ids=train_ds.sample_ids,
+        sample_ids=train_sample_ids,
         prompt_field=args.prompt_field,
         tokenizer=tokenizer,
     )
     natural_meta_rows = _metadata_rows_from_ids(
         pool_rows=eval_pool_rows,
-        sample_ids=natural_ds.sample_ids,
+        sample_ids=natural_sample_ids,
         prompt_field=args.prompt_field,
         tokenizer=tokenizer,
     )
     matched_meta_rows = _metadata_rows_from_ids(
         pool_rows=eval_pool_rows,
-        sample_ids=matched_ds.sample_ids,
+        sample_ids=matched_sample_ids,
         prompt_field=args.prompt_field,
         tokenizer=tokenizer,
     )
 
-    train_labels_np = train_ds.y.numpy().astype(int)
+    train_labels_np = train_y.numpy().astype(int)
     metadata_models: dict[str, MetadataModel] = {}
     metadata_baselines: dict[str, dict[str, object]] = {}
     for feature_set in ("legacy", "strong"):
@@ -569,15 +633,15 @@ def main() -> None:
         metadata_models[feature_set] = meta_model
         metadata_baselines[feature_set] = {
             "train": _evaluate_logits(
-                train_ds.y,
+                train_y,
                 torch.tensor(meta_model.decision_function(train_meta_rows), dtype=torch.float32),
             ),
             "natural": _evaluate_logits(
-                natural_ds.y,
+                natural_y,
                 torch.tensor(meta_model.decision_function(natural_meta_rows), dtype=torch.float32),
             ),
             "matched": _evaluate_logits(
-                matched_ds.y,
+                matched_y,
                 torch.tensor(meta_model.decision_function(matched_meta_rows), dtype=torch.float32),
             ),
             "params": meta_model.to_json(),
@@ -591,27 +655,27 @@ def main() -> None:
 
     device = choose_device(args.device)
     train_loader = _build_loader(
-        train_ds.x,
+        train_x,
         train_meta_logits,
-        train_ds.y,
+        train_y,
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.num_workers,
         pin_memory=(device.type == "cuda"),
     )
     natural_loader = _build_loader(
-        natural_ds.x,
+        natural_x,
         natural_meta_logits,
-        natural_ds.y,
+        natural_y,
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=args.num_workers,
         pin_memory=(device.type == "cuda"),
     )
     matched_loader = _build_loader(
-        matched_ds.x,
+        matched_x,
         matched_meta_logits,
-        matched_ds.y,
+        matched_y,
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=args.num_workers,
@@ -628,8 +692,8 @@ def main() -> None:
             warmup_steps = 1
         warmup_steps = min(warmup_steps, max(total_steps - 1, 0))
 
-    num_pos = int((train_ds.y == 1).sum().item())
-    num_neg = int((train_ds.y == 0).sum().item())
+    num_pos = int((train_y == 1).sum().item())
+    num_neg = int((train_y == 0).sum().item())
     if num_pos > 0 and num_neg > 0:
         pos_weight = torch.tensor(float(num_neg / num_pos), dtype=torch.float32, device=device)
     else:
@@ -650,7 +714,7 @@ def main() -> None:
             dropout=args.mlp_dropout,
             depth=args.mlp_depth,
         )
-        model = build_probe_model(input_dim=int(train_ds.x.size(1)), probe_cfg=probe_cfg).to(device)
+        model = build_probe_model(input_dim=int(train_x.size(1)), probe_cfg=probe_cfg).to(device)
         optimizer = torch.optim.AdamW(
             model.parameters(),
             lr=args.lr,
@@ -779,6 +843,7 @@ def main() -> None:
                         "step": global_step,
                         "state_dict": model.state_dict(),
                         "feature_key": feature_key,
+                        "feature_keys": resolved_train_keys,
                         "probe_config": probe_cfg.to_dict(),
                         "metadata_feature_set": args.metadata_feature_set,
                         "metadata_model": active_meta_model.to_json(),

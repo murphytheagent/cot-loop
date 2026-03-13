@@ -239,7 +239,14 @@ def _validate_layer_for_pooling(*, pooling: str, layer: int, key: str) -> None:
             "Rollout-completion all-layer pooling ignores --feature-layer and "
             f"requires -1 for feature view '{key}', got {layer}."
         )
-    if pooling in ("last_token_all_layers_mean", "last_token_all_layers_concat") and layer != -1:
+    if pooling in (
+        "last_token_all_layers_mean",
+        "last_token_all_layers_concat",
+        "last16_all_layers_concat",
+        "last8_prev8_delta_all_layers_concat",
+        "last16_mid16_delta_all_layers_concat",
+        "last16_plus_delta8_all_layers_concat",
+    ) and layer != -1:
         raise SystemExit(
             "All-layer prefill pooling ignores --feature-layer and requires -1 for "
             f"feature view '{key}', got {layer}."
