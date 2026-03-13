@@ -1,11 +1,21 @@
 # CoT Loop Detection PR #2: Consolidated Experiments and Findings
 
-Last updated: 2026-03-05 18:16 UTC
-Scope covered: 2026-03-01 19:00 UTC through 2026-03-05 18:16 UTC
+Last updated: 2026-03-13 13:05 UTC
+Scope covered: 2026-03-01 19:00 UTC through 2026-03-13 13:05 UTC
 PR: https://github.com/Zhi0467/cot-loop/pull/2
 
 ## Goal
-Predict whether a (model, prompt) pair will enter a loop (n=30-gram repeating >= k=20) using prefill activations before generation.
+Predict whether a (model, prompt) pair will enter a loop (n=30-gram repeating >= k=20) using configurable activation views. PR #2 began as a prefill-ablation branch, and the later continuation on the same branch also compares those prefill views against rollout-completion features plus metadata-aware prefill follow-ups.
+
+## Status After Reopened Prefill Follow-Up (2026-03-13)
+
+- Round G still remains the strongest mixed-view result in this repo: rollout-completion features continue to outperform the tested prefill views on shared labels.
+- The reopened 2026-03-13 prefill follow-up tightened the prefill-only story substantially:
+  - Round 2 showed that the large raw prefill drop is driven primarily by prompt-length control rather than just train-size or source-balance effects.
+  - Round 3 showed that residual prefill signal survives a frozen metadata baseline (`natural PR-AUC 0.420`, `matched PR-AUC 0.647`).
+  - Round 4 showed that simple boundary-summary replacements do not beat the metadata-aware all-layer last-token anchor (`matched PR-AUC 0.642`, `matched ROC-AUC 0.681`).
+  - Round 5 showed that `anchor + last16` is mildly complementary: it reaches `natural PR-AUC 0.431` and `matched PR-AUC 0.650`, modestly above the Round 4 anchor alone.
+- Current interpretation: completion-view features are still the strongest overall arm, but the prefill-only line is now more precise. The all-layer last-token anchor remains the core prefill representation, and boundary context looks useful only as a small augmentation rather than as a replacement.
 
 ## Experiment Inventory
 
