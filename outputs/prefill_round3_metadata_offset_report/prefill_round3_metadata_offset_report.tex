@@ -1,0 +1,73 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{hyperref}
+
+\title{Prefill Round 3: Metadata-Offset Residual Training on k=5 Source-Control Features}
+\author{}
+\date{2026-03-13 11:38 UTC}
+
+\begin{document}
+\maketitle
+
+\section*{Question}
+Round 2 showed that prompt length is the dominant shortcut in the prompt-only prefill detector: the raw \textbf{source-control} arm remained strong, but performance dropped once training was also length-matched. The next question was whether the surviving prompt-time signal could be recovered more cleanly by \emph{conditioning on metadata during training}, rather than only controlling metadata through subset construction.
+
+\section*{Setup}
+I reused the preserved Round 2 k=5 all-layer prefill last-token concat features, so this round required no new rollouts.
+
+Train/eval configuration:
+\begin{itemize}
+  \item \textbf{Train split}: the Round 2 \textbf{source-control} subset (2{,}096 train examples; same source/class counts as the length-matched arm, but sampled randomly over prompt lengths).
+  \item \textbf{Natural test}: the preserved Round G natural test set (560 examples, 115 positives).
+  \item \textbf{Matched test}: the Round 2 source/length-matched eval slice (230 examples, 115 positives + 115 negatives).
+  \item \textbf{Hidden model}: same MLP family as the prior prompt-only best arm (hidden dim 512, depth 2, dropout 0.03), 3 seeds, checkpoint selection on natural-test ROC-AUC with macro-F1 tie-break.
+  \item \textbf{Residual objective}: fit a frozen metadata-only logistic model first, then train the hidden branch as an additive correction:
+  \[
+    \text{logit}(\hat y) = \text{metadata\_logit}(m) + \text{hidden\_logit}(h).
+  \]
+\end{itemize}
+
+Metadata controls:
+\begin{itemize}
+  \item \textbf{Validated legacy control}: `source + prompt length + newline count + digit count + LaTeX-dollar count`.
+  \item I also tried a token-length/interactions variant in the smoke pass, but it underperformed the legacy control, so the main batch freezes the validated legacy model instead of calling the weaker variant ``stronger''.
+\end{itemize}
+
+\section*{Main Results}
+\begin{center}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}p{3.1cm}rrrr@{}}
+\toprule
+Arm & Natural PR & Natural ROC & Matched PR & Matched ROC \\
+\midrule
+Legacy metadata only & 0.3346 & 0.6567 & 0.5487 & 0.5408 \\
+Round 2 source-control hidden & 0.4562 & 0.7498 & 0.6780 & 0.6966 \\
+Round 3 additive residual & 0.4201 $\pm$ 0.0069 & 0.7504 $\pm$ 0.0014 & 0.6474 $\pm$ 0.0088 & 0.6857 $\pm$ 0.0073 \\
+Round 2 length-matched hidden & 0.4092 & 0.7172 & 0.6211 & 0.6205 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Additional residual-only ranking metrics for the Round 3 additive model:
+\begin{itemize}
+  \item \textbf{Natural test within source$\times$token-length bins}: macro PR-AUC $0.4165 \pm 0.0110$, macro ROC-AUC $0.6415 \pm 0.0038$.
+  \item \textbf{Matched test within source$\times$token-length bins}: macro PR-AUC $0.6546 \pm 0.0109$, macro ROC-AUC $0.6284 \pm 0.0107$.
+\end{itemize}
+
+\section*{Interpretation}
+\begin{itemize}
+  \item \textbf{The residual signal survives explicit metadata conditioning.} Relative to the validated metadata baseline, the additive model gains \textbf{+0.0855 PR-AUC / +0.0937 ROC-AUC} on the natural test and \textbf{+0.0987 PR-AUC / +0.1449 ROC-AUC} on the matched test.
+  \item \textbf{Metadata-aware training removes part of the shortcut inflation, but not all of the useful signal.} Compared with the raw Round 2 source-control hidden probe, the additive model gives up about \textbf{0.036} natural PR-AUC and \textbf{0.031} matched PR-AUC, while keeping natural ROC essentially unchanged.
+  \item \textbf{The additive model beats the fully length-matched hidden probe.} Even after freezing the metadata branch, Round 3 still lands above the Round 2 length-matched hidden probe by \textbf{+0.0109 PR-AUC / +0.0332 ROC-AUC} on the natural test and \textbf{+0.0262 PR-AUC / +0.0652 ROC-AUC} on the matched test.
+  \item \textbf{This means the source-control arm was not pure noise, but it was partly shortcut-inflated.} A substantial fraction of the raw source-control lift can be recovered with a metadata-aware objective, which is stronger evidence for genuine residual prefill signal than the earlier composition-only controls alone.
+  \item \textbf{The next lever should now be representation, not another composition sweep.} The main unresolved question is no longer whether any residual prompt-time signal exists; it is whether a better prompt summary can improve the metadata-conditioned residual view beyond the current last-token concat features.
+\end{itemize}
+
+\section*{Bottom Line}
+The Round 3 result changes the diagnosis from ``residual prefill signal exists, but maybe only after harsh matching'' to a stronger statement: \textbf{a metadata-aware prompt-only probe trained on the source-control split still retains a meaningful matched-eval advantage over the validated metadata baseline, and it outperforms the fully length-matched hidden probe.} The most valuable next round is therefore to keep the metadata-aware evaluation frame fixed and move on to \emph{better prefill summaries} (for example boundary-window pooling) rather than spending more budget on dataset composition variants of the same last-token concat view.
+
+\end{document}
