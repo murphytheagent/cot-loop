@@ -18,7 +18,7 @@ export XDG_CACHE_HOME=/data/scratch/murphy/cache
 export PIP_CACHE_DIR=/data/scratch/murphy/cache/pip
 export WANDB_MODE=offline
 
-PYTHON_BIN=/data/scratch/murphy/venvs/cot-loop-detection-runtime-py310/bin/python
+PYTHON_BIN=/home/murphy/miniforge3/envs/swe311/bin/python
 REPO_ROOT=/home/murphy/projects/worktrees/cot-loop-detection-runtime
 OUT_ROOT=/data/scratch/murphy/outputs/cot-loop-detection
 DATA_ROOT=/data/scratch/murphy/datasets/cot-loop-detection
