@@ -61,8 +61,19 @@ def _load_local_jsonl_records(spec: DatasetSpec, prompt_field: str) -> list[Samp
         prompt = row.get(actual_prompt_field)
         if prompt is None:
             continue
+        sample_id = row.get("_source_sample_id", idx)
+        try:
+            sample_id = int(sample_id)
+        except Exception as exc:
+            raise SystemExit(
+                f"Row {idx} in '{spec.dataset}' has invalid _source_sample_id={sample_id!r}."
+            ) from exc
+        if sample_id < 0:
+            raise SystemExit(
+                f"Row {idx} in '{spec.dataset}' has negative _source_sample_id={sample_id}."
+            )
         records.append(
-            SampleRecord(sample_id=idx, prompt=str(prompt), source_split=spec.split)
+            SampleRecord(sample_id=sample_id, prompt=str(prompt), source_split=spec.split)
         )
     return records
 

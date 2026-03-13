@@ -1,0 +1,79 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{hyperref}
+
+\title{Prefill Round 7: Objective-Side Check on the Round 6 Anchor}
+\author{}
+\date{2026-03-13 16:09 UTC}
+
+\begin{document}
+\maketitle
+
+\section*{Question}
+Round 6 ruled out static boundary-summary fusion as the main next lever: under a cleaner train-side holdout selector, the all-layer last-token \textbf{anchor} was again the best prefill arm. The next compact question was therefore training-side: can the same anchor be improved by either (1) selector alignment to within-source$\times$length-bin PR-AUC or (2) a small length-robust objective such as equal-bin BCE or within-bin ranking?
+
+\section*{Setup}
+I kept the feature view and datasets fixed and changed only training / selection.
+
+\begin{itemize}
+  \item \textbf{Data}: unchanged from Rounds 4--6 (source-control train, natural test, source/length-matched test), using the saved Round 4 anchor tensors.
+  \item \textbf{Metadata branch}: same validated legacy control.
+  \item \textbf{Base selector}: holdout \texttt{PR-AUC} on a fixed 15\% train-side split, with holdout within-bin PR-AUC as tie-break.
+  \item \textbf{Free selector-only diagnostic}: reselect the already-trained Round 6 anchor by holdout within-bin PR-AUC without retraining.
+  \item \textbf{Round 7 batch}: three 3-seed anchor-only arms:
+    \begin{itemize}
+      \item large-batch BCE control,
+      \item equal-bin BCE,
+      \item equal-bin BCE + within-bin pairwise ranking.
+    \end{itemize}
+\end{itemize}
+
+The equal-bin groups were source$\times$token-length terciles on the train split. The ranking term used logistic pairwise loss on the final metadata-adjusted logit.
+
+\section*{Main Results}
+\begin{center}
+\small
+\setlength{\tabcolsep}{4pt}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{@{}p{5.2cm}rrrrrr@{}}
+\toprule
+Arm & Natural PR & Natural ROC & Matched PR & Matched ROC & Matched bin PR & $\Delta$ Matched PR vs R6 anchor \\
+\midrule
+Round 6 anchor (reported) & 0.4138 & 0.7407 & 0.6498 & 0.6836 & 0.6641 & 0.0000 \\
+Round 6 anchor reselected by val bin PR & 0.3940 & 0.7379 & 0.6254 & 0.6674 & 0.6374 & -0.0244 \\
+Round 7 BCE large-batch control & 0.4141 & 0.7427 & 0.6381 & 0.6720 & 0.6496 & -0.0117 \\
+Round 7 equal-bin BCE & 0.4025 & 0.7425 & 0.6189 & 0.6640 & 0.6146 & -0.0309 \\
+Round 7 equal-bin BCE + rank & 0.4056 & 0.7448 & 0.6270 & 0.6716 & 0.6242 & -0.0228 \\
+\bottomrule
+\end{tabular}
+}
+\end{center}
+
+Post-hoc reselection of the new Round 7 arms by holdout within-bin PR-AUC also made them worse, not better:
+\begin{itemize}
+  \item BCE large-batch: matched PR-AUC \textbf{0.6068}, matched bin PR-AUC \textbf{0.6105}
+  \item equal-bin BCE: matched PR-AUC \textbf{0.6059}, matched bin PR-AUC \textbf{0.6115}
+  \item equal-bin BCE + rank: matched PR-AUC \textbf{0.6144}, matched bin PR-AUC \textbf{0.6102}
+\end{itemize}
+
+\section*{Interpretation}
+\begin{itemize}
+  \item \textbf{Selector alignment is not the missing trick.} The no-retrain diagnostic on the saved Round 6 anchor already shows that selecting by holdout within-bin PR-AUC pushes the checkpoint in the wrong direction on both matched PR-AUC and matched within-bin PR-AUC.
+  \item \textbf{The best prefill arm is still the original Round 6 anchor.} Even the large-batch BCE control, which keeps the same feature view and stable selector while changing only the optimization regime, loses about \textbf{0.012} matched PR-AUC and \textbf{0.015} matched within-bin PR-AUC.
+  \item \textbf{Equal-bin BCE overcorrects.} It is materially worse than both the Round 6 anchor and the large-batch BCE control on the matched eval.
+  \item \textbf{The ranking auxiliary only partially repairs that damage.} It improves on equal-bin BCE, but it still does not beat the simpler large-batch BCE control, and it stays clearly below the Round 6 anchor.
+  \item \textbf{The scientific conclusion is now sharper.} Within the current one-bit target + static-anchor setup, both boundary fusion and small length-robust objective tweaks appear exhausted. The remaining prefill signal is real above metadata, but not easily unlocked by another local loss change.
+\end{itemize}
+
+\section*{Bottom Line}
+Round 7 is a negative but useful result: the \textbf{original Round 6 anchor} remains the strongest prefill-only arm, and neither selector-only changes nor local grouped-objective tweaks improve on it. My read is that the next high-value round should \textbf{change the target or the representation}, not continue to tune the same one-bit static-anchor classifier. The most plausible next directions are:
+\begin{itemize}
+  \item onset-horizon / severity-style supervision rather than a single eventual-loop bit;
+  \item an order-sensitive last-64-token prefill sequence head rather than another static summary of the final boundary state.
+\end{itemize}
+
+\end{document}

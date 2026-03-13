@@ -51,7 +51,7 @@ def _parse_args() -> argparse.Namespace:
         "--splits",
         nargs="+",
         choices=("train", "test"),
-        default=("train", "test"),
+        default=None,
     )
     parser.add_argument("--feature-key", default=None)
     parser.add_argument(
@@ -161,6 +161,31 @@ def _load_reference_manifest(reference_data_dir: str) -> dict[str, object]:
     manifest_path = os.path.join(reference_data_dir, "manifest.json")
     with open(manifest_path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def _resolve_built_splits(
+    manifest: dict[str, object],
+    requested_splits: list[str] | tuple[str, ...] | None,
+) -> list[str]:
+    available_splits = [
+        split for split in ("train", "test") if isinstance(manifest.get(split), dict)
+    ]
+    if not available_splits:
+        raise SystemExit(
+            "Reference manifest does not expose any top-level train/test splits."
+        )
+
+    if not requested_splits:
+        return available_splits
+
+    built_splits = list(dict.fromkeys(requested_splits))
+    missing = [split for split in built_splits if split not in available_splits]
+    if missing:
+        raise SystemExit(
+            "Requested split(s) are unavailable in the reference manifest: "
+            f"{missing}. Available splits: {available_splits}"
+        )
+    return built_splits
 
 
 def _load_reference_split(
@@ -311,7 +336,11 @@ def main() -> None:
         for key, spec in feature_views.items()
     }
 
-    built_splits = list(dict.fromkeys(args.splits))
+    built_splits = _resolve_built_splits(reference_manifest, args.splits)
+    print(
+        f"Rebuilding splits {built_splits} from {args.reference_data_dir}",
+        flush=True,
+    )
 
     for split in built_splits:
         labels, sample_ids = _load_reference_split(
@@ -376,6 +405,7 @@ def main() -> None:
         payload[split] = manifest_views[primary_key][split]
     for key in (
         "balancing",
+        "label_spec",
         "loop_detector",
         "rollout_config",
         "seed",

@@ -18,6 +18,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.preprocessing import StandardScaler
 from torch import nn
+from torch.nn import functional as F
 from torch.utils.data import DataLoader, Dataset
 from transformers import AutoTokenizer
 
@@ -37,6 +38,16 @@ SUMMARY_METRICS = (
     "positive_recall",
     "positive_f1",
     "prevalence",
+    "roc_auc",
+    "pr_auc",
+    "bin_roc_auc",
+    "bin_pr_auc",
+)
+
+SELECTION_METRIC_CHOICES = (
+    "accuracy",
+    "macro_f1",
+    "positive_f1",
     "roc_auc",
     "pr_auc",
     "bin_roc_auc",
@@ -63,6 +74,7 @@ class ResidualDataset(Dataset):
         hidden_x: torch.Tensor,
         meta_logits: torch.Tensor,
         labels: torch.Tensor,
+        group_ids: torch.Tensor | None = None,
     ) -> None:
         if hidden_x.ndim != 2:
             raise SystemExit(f"Expected 2D hidden features, got {tuple(hidden_x.shape)}")
@@ -73,15 +85,23 @@ class ResidualDataset(Dataset):
         num_rows = int(hidden_x.size(0))
         if num_rows != int(meta_logits.size(0)) or num_rows != int(labels.size(0)):
             raise SystemExit("ResidualDataset length mismatch.")
+        if group_ids is not None:
+            if group_ids.ndim != 1:
+                raise SystemExit(f"Expected 1D group ids, got {tuple(group_ids.shape)}")
+            if num_rows != int(group_ids.size(0)):
+                raise SystemExit("ResidualDataset group_ids length mismatch.")
         self.hidden_x = hidden_x
         self.meta_logits = meta_logits
         self.labels = labels
+        self.group_ids = group_ids
 
     def __len__(self) -> int:
         return int(self.labels.size(0))
 
     def __getitem__(self, idx: int):
-        return self.hidden_x[idx], self.meta_logits[idx], self.labels[idx]
+        if self.group_ids is None:
+            return self.hidden_x[idx], self.meta_logits[idx], self.labels[idx]
+        return self.hidden_x[idx], self.meta_logits[idx], self.labels[idx], self.group_ids[idx]
 
 
 class MetadataModel:
@@ -275,17 +295,28 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--selection-metric",
-        choices=("accuracy", "macro_f1", "positive_f1", "roc_auc", "pr_auc"),
+        choices=SELECTION_METRIC_CHOICES,
         default="roc_auc",
     )
     parser.add_argument(
         "--tie-breaker",
-        choices=("accuracy", "macro_f1", "positive_f1", "roc_auc", "pr_auc"),
+        choices=SELECTION_METRIC_CHOICES,
         default="macro_f1",
     )
     parser.add_argument("--low-rank-dim", type=int, default=0)
     parser.add_argument("--holdout-ratio", type=float, default=0.0)
     parser.add_argument("--holdout-seed", type=int, default=0)
+    parser.add_argument(
+        "--train-objective",
+        choices=("bce", "group_bce", "group_bce_rank"),
+        default="bce",
+    )
+    parser.add_argument("--rank-lambda", type=float, default=0.25)
+    parser.add_argument("--rank-tau", type=float, default=1.0)
+    parser.add_argument("--rank-warmup-epochs", type=int, default=1)
+    parser.add_argument("--rank-min-pos", type=int, default=1)
+    parser.add_argument("--rank-min-neg", type=int, default=1)
+    parser.add_argument("--rank-max-pairs-per-group", type=int, default=0)
     return parser.parse_args()
 
 
@@ -308,6 +339,24 @@ def _validate_args(args: argparse.Namespace) -> None:
         raise SystemExit("--holdout-ratio must be in [0, 1).")
     if args.selection_split == "val" and args.holdout_ratio <= 0.0:
         raise SystemExit("--selection-split=val requires --holdout-ratio > 0.")
+    if args.rank_lambda < 0.0:
+        raise SystemExit("--rank-lambda must be >= 0.")
+    if args.rank_tau <= 0.0:
+        raise SystemExit("--rank-tau must be > 0.")
+    if args.rank_warmup_epochs < 1:
+        raise SystemExit("--rank-warmup-epochs must be >= 1.")
+    if args.rank_min_pos < 1:
+        raise SystemExit("--rank-min-pos must be >= 1.")
+    if args.rank_min_neg < 1:
+        raise SystemExit("--rank-min-neg must be >= 1.")
+    if args.rank_max_pairs_per_group < 0:
+        raise SystemExit("--rank-max-pairs-per-group must be >= 0.")
+    if args.train_objective != "group_bce_rank" and args.rank_lambda > 0.0:
+        print(
+            f"Ignoring --rank-lambda={args.rank_lambda} because --train-objective={args.train_objective}.",
+            file=sys.stderr,
+            flush=True,
+        )
 
 
 def _load_jsonl_rows(path: str) -> list[dict[str, object]]:
@@ -431,6 +480,74 @@ def _build_holdout_split(
     )
 
 
+def _assign_source_length_groups(
+    *,
+    rows: list[PromptMetadata],
+    num_length_bins: int,
+) -> tuple[torch.Tensor, list[dict[str, object]]]:
+    group_ids = np.full(len(rows), -1, dtype=np.int64)
+    group_summaries: list[dict[str, object]] = []
+    next_group_id = 0
+    sources = sorted({row.source for row in rows})
+    for source in sources:
+        indices = np.asarray(
+            [idx for idx, row in enumerate(rows) if row.source == source],
+            dtype=np.int64,
+        )
+        if indices.size == 0:
+            continue
+        source_lengths = np.asarray([rows[int(idx)].token_length for idx in indices], dtype=np.float64)
+        quantiles = np.linspace(0.0, 1.0, num_length_bins + 1)
+        edges = np.quantile(source_lengths, quantiles)
+        if np.unique(edges).size <= 1:
+            bin_assignments = np.zeros(indices.size, dtype=np.int64)
+            bin_ids = [0]
+        else:
+            bin_assignments = np.searchsorted(edges[1:-1], source_lengths, side="right")
+            bin_ids = list(range(num_length_bins))
+        for bin_id in bin_ids:
+            subset_idx = indices[bin_assignments == bin_id]
+            if subset_idx.size == 0:
+                continue
+            group_ids[subset_idx] = next_group_id
+            group_summaries.append(
+                {
+                    "group_id": next_group_id,
+                    "group_label": f"{source}::len_bin_{bin_id}",
+                    "source": source,
+                    "length_bin": int(bin_id),
+                    "num_rows": int(subset_idx.size),
+                    "token_length_min": int(source_lengths[bin_assignments == bin_id].min()),
+                    "token_length_max": int(source_lengths[bin_assignments == bin_id].max()),
+                }
+            )
+            next_group_id += 1
+    if np.any(group_ids < 0):
+        raise SystemExit("Some training rows were not assigned to a source×length group.")
+    return torch.tensor(group_ids, dtype=torch.long), group_summaries
+
+
+def _attach_group_label_stats(
+    *,
+    group_summaries: list[dict[str, object]],
+    group_ids: torch.Tensor,
+    labels: torch.Tensor,
+) -> list[dict[str, object]]:
+    labels_np = labels.detach().cpu().numpy().astype(int)
+    group_ids_np = group_ids.detach().cpu().numpy().astype(int)
+    out: list[dict[str, object]] = []
+    for summary in group_summaries:
+        group_id = int(summary["group_id"])
+        mask = group_ids_np == group_id
+        pos = int(labels_np[mask].sum())
+        total = int(mask.sum())
+        row = dict(summary)
+        row["num_pos"] = pos
+        row["num_neg"] = total - pos
+        out.append(row)
+    return out
+
+
 def _bin_metrics(
     *,
     rows: list[PromptMetadata],
@@ -508,6 +625,7 @@ def _build_loader(
     hidden_x: torch.Tensor,
     meta_logits: np.ndarray,
     labels: torch.Tensor,
+    group_ids: torch.Tensor | None = None,
     *,
     batch_size: int,
     shuffle: bool,
@@ -518,6 +636,7 @@ def _build_loader(
         hidden_x=hidden_x.to(dtype=torch.float32),
         meta_logits=torch.tensor(meta_logits, dtype=torch.float32),
         labels=labels.to(dtype=torch.float32),
+        group_ids=None if group_ids is None else group_ids.to(dtype=torch.long),
     )
     return DataLoader(
         ds,
@@ -533,13 +652,89 @@ def _evaluate_loader(model, loader: DataLoader, device: torch.device) -> tuple[t
     all_logits = []
     all_labels = []
     with torch.inference_mode():
-        for hidden_x, meta_logits, labels in loader:
+        for batch in loader:
+            if len(batch) == 4:
+                hidden_x, meta_logits, labels, _group_ids = batch
+            else:
+                hidden_x, meta_logits, labels = batch
             hidden_x = hidden_x.to(device)
             meta_logits = meta_logits.to(device)
             logits = model(hidden_x) + meta_logits
             all_logits.append(logits.detach().cpu())
             all_labels.append(labels.detach().cpu())
     return torch.cat(all_labels, dim=0), torch.cat(all_logits, dim=0)
+
+
+def _equal_group_bce_loss(
+    *,
+    logits: torch.Tensor,
+    labels: torch.Tensor,
+    group_ids: torch.Tensor,
+    pos_weight: torch.Tensor,
+) -> tuple[torch.Tensor, int]:
+    per_example = F.binary_cross_entropy_with_logits(
+        logits,
+        labels,
+        pos_weight=pos_weight,
+        reduction="none",
+    )
+    group_losses = []
+    unique_groups = torch.unique(group_ids, sorted=True)
+    for group_id in unique_groups.tolist():
+        mask = group_ids == int(group_id)
+        if not torch.any(mask):
+            continue
+        group_losses.append(per_example[mask].mean())
+    if not group_losses:
+        return per_example.mean(), 0
+    return torch.stack(group_losses).mean(), len(group_losses)
+
+
+def _within_group_pairwise_loss(
+    *,
+    logits: torch.Tensor,
+    labels: torch.Tensor,
+    group_ids: torch.Tensor,
+    tau: float,
+    min_pos: int,
+    min_neg: int,
+    max_pairs_per_group: int,
+) -> tuple[torch.Tensor, int, int]:
+    if tau <= 0.0:
+        raise ValueError("tau must be positive.")
+    group_losses = []
+    eligible_groups = 0
+    total_pairs = 0
+    unique_groups = torch.unique(group_ids, sorted=True)
+    for group_id in unique_groups.tolist():
+        mask = group_ids == int(group_id)
+        if int(mask.sum().item()) < (min_pos + min_neg):
+            continue
+        group_logits = logits[mask]
+        group_labels = labels[mask] > 0.5
+        pos_logits = group_logits[group_labels]
+        neg_logits = group_logits[~group_labels]
+        if int(pos_logits.numel()) < min_pos or int(neg_logits.numel()) < min_neg:
+            continue
+        diffs = (pos_logits[:, None] - neg_logits[None, :]).reshape(-1) / tau
+        if max_pairs_per_group > 0 and int(diffs.numel()) > max_pairs_per_group:
+            pair_idx = torch.randperm(int(diffs.numel()), device=diffs.device)[:max_pairs_per_group]
+            diffs = diffs.index_select(0, pair_idx)
+        group_losses.append(F.softplus(-diffs).mean())
+        eligible_groups += 1
+        total_pairs += int(diffs.numel())
+    if not group_losses:
+        return logits.new_tensor(0.0), 0, 0
+    return torch.stack(group_losses).mean(), eligible_groups, total_pairs
+
+
+def _rank_weight_for_epoch(*, epoch: int, max_weight: float, warmup_epochs: int) -> float:
+    if max_weight <= 0.0:
+        return 0.0
+    if warmup_epochs <= 1:
+        return max_weight
+    progress = min(max((epoch - 1) / float(warmup_epochs - 1), 0.0), 1.0)
+    return max_weight * progress
 
 
 def _best_key(
@@ -759,6 +954,22 @@ def main() -> None:
     model_train_y = train_y.index_select(0, train_idx)
     model_train_sample_ids = train_sample_ids.index_select(0, train_idx)
     model_train_meta_rows = _subset_meta_rows(train_meta_rows, train_idx)
+    train_group_ids, train_group_summaries = _assign_source_length_groups(
+        rows=model_train_meta_rows,
+        num_length_bins=args.num_length_bins,
+    )
+    train_group_summaries = _attach_group_label_stats(
+        group_summaries=train_group_summaries,
+        group_ids=train_group_ids,
+        labels=model_train_y,
+    )
+    _write_json(
+        os.path.join(args.out_dir, "train_group_summary.json"),
+        {
+            "num_length_bins": args.num_length_bins,
+            "groups": train_group_summaries,
+        },
+    )
 
     holdout_x: torch.Tensor | None = None
     holdout_y: torch.Tensor | None = None
@@ -813,6 +1024,7 @@ def main() -> None:
         model_train_x,
         train_meta_logits,
         model_train_y,
+        group_ids=train_group_ids,
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.num_workers,
@@ -881,7 +1093,6 @@ def main() -> None:
             lr=args.lr,
             weight_decay=args.weight_decay,
         )
-        criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
         best_rank = (float("-inf"), float("-inf"))
         best_row: dict[str, object] | None = None
@@ -890,12 +1101,28 @@ def main() -> None:
         for epoch in range(1, args.epochs + 1):
             model.train()
             running_loss = 0.0
+            running_pointwise_loss = 0.0
+            running_group_bce_loss = 0.0
+            running_rank_loss = 0.0
             seen = 0
+            rank_weight_now = _rank_weight_for_epoch(
+                epoch=epoch,
+                max_weight=args.rank_lambda,
+                warmup_epochs=args.rank_warmup_epochs,
+            )
+            epoch_group_count = 0
+            epoch_rank_group_count = 0
+            epoch_rank_pair_count = 0
             train_logits = []
             train_labels = []
             lr_now = args.lr
 
-            for batch_idx, (hidden_x, meta_logits, labels) in enumerate(train_loader, start=1):
+            for batch_idx, batch in enumerate(train_loader, start=1):
+                if len(batch) == 4:
+                    hidden_x, meta_logits, labels, batch_group_ids = batch
+                else:
+                    hidden_x, meta_logits, labels = batch
+                    batch_group_ids = None
                 if args.lr_scheduler == "cosine":
                     scale = _cosine_lr_factor(
                         global_step + 1,
@@ -910,10 +1137,43 @@ def main() -> None:
                 hidden_x = hidden_x.to(device)
                 meta_logits = meta_logits.to(device)
                 labels = labels.to(device)
+                if batch_group_ids is not None:
+                    batch_group_ids = batch_group_ids.to(device)
 
                 residual_logits = model(hidden_x)
                 total_logits = residual_logits + meta_logits
-                loss = criterion(total_logits, labels)
+                pointwise_loss = F.binary_cross_entropy_with_logits(
+                    total_logits,
+                    labels,
+                    pos_weight=pos_weight,
+                )
+                group_bce_loss = pointwise_loss
+                group_count = 0
+                rank_loss = total_logits.new_tensor(0.0)
+                rank_group_count = 0
+                rank_pair_count = 0
+                loss = pointwise_loss
+                if args.train_objective != "bce":
+                    if batch_group_ids is None:
+                        raise SystemExit("Grouped objectives require group ids in the training loader.")
+                    group_bce_loss, group_count = _equal_group_bce_loss(
+                        logits=total_logits,
+                        labels=labels,
+                        group_ids=batch_group_ids,
+                        pos_weight=pos_weight,
+                    )
+                    loss = group_bce_loss
+                    if args.train_objective == "group_bce_rank":
+                        rank_loss, rank_group_count, rank_pair_count = _within_group_pairwise_loss(
+                            logits=total_logits,
+                            labels=labels,
+                            group_ids=batch_group_ids,
+                            tau=args.rank_tau,
+                            min_pos=args.rank_min_pos,
+                            min_neg=args.rank_min_neg,
+                            max_pairs_per_group=args.rank_max_pairs_per_group,
+                        )
+                        loss = loss + (rank_weight_now * rank_loss)
 
                 optimizer.zero_grad(set_to_none=True)
                 loss.backward()
@@ -921,7 +1181,13 @@ def main() -> None:
 
                 batch_size = int(labels.size(0))
                 running_loss += float(loss.item()) * batch_size
+                running_pointwise_loss += float(pointwise_loss.item()) * batch_size
+                running_group_bce_loss += float(group_bce_loss.item()) * batch_size
+                running_rank_loss += float(rank_loss.item()) * batch_size
                 seen += batch_size
+                epoch_group_count += group_count
+                epoch_rank_group_count += rank_group_count
+                epoch_rank_pair_count += rank_pair_count
                 global_step += 1
                 train_logits.append(total_logits.detach().cpu())
                 train_labels.append(labels.detach().cpu())
@@ -930,7 +1196,11 @@ def main() -> None:
                     avg_loss = running_loss / max(seen, 1)
                     print(
                         f"seed={seed} epoch={epoch} batch={batch_idx} "
-                        f"step={global_step} train_loss={avg_loss:.6f} lr={lr_now:.6e}",
+                        f"step={global_step} train_loss={avg_loss:.6f} "
+                        f"pointwise_loss={running_pointwise_loss / max(seen, 1):.6f} "
+                        f"group_bce_loss={running_group_bce_loss / max(seen, 1):.6f} "
+                        f"rank_loss={running_rank_loss / max(seen, 1):.6f} "
+                        f"rank_weight={rank_weight_now:.4f} lr={lr_now:.6e}",
                         flush=True,
                     )
 
@@ -938,11 +1208,15 @@ def main() -> None:
             train_labels_cat = torch.cat(train_labels, dim=0)
             train_metrics = _evaluate_logits(train_labels_cat, train_logits_cat)
             train_loss_epoch = running_loss / max(seen, 1)
+            train_pointwise_loss_epoch = running_pointwise_loss / max(seen, 1)
+            train_group_bce_loss_epoch = running_group_bce_loss / max(seen, 1)
+            train_rank_loss_epoch = running_rank_loss / max(seen, 1)
 
             if epoch % args.eval_every != 0:
                 print(
                     f"seed={seed} epoch={epoch} train_loss={train_loss_epoch:.6f} "
-                    f"train_auc={train_metrics['roc_auc']:.4f} train_pr_auc={train_metrics['pr_auc']:.4f}",
+                    f"train_auc={train_metrics['roc_auc']:.4f} train_pr_auc={train_metrics['pr_auc']:.4f} "
+                    f"rank_weight={rank_weight_now:.4f}",
                     flush=True,
                 )
                 continue
@@ -987,6 +1261,13 @@ def main() -> None:
                 "step": global_step,
                 "lr": lr_now,
                 "train_loss": train_loss_epoch,
+                "train_pointwise_loss": train_pointwise_loss_epoch,
+                "train_group_bce_loss": train_group_bce_loss_epoch,
+                "train_rank_loss": train_rank_loss_epoch,
+                "train_rank_weight": rank_weight_now,
+                "train_group_count": epoch_group_count,
+                "train_rank_group_count": epoch_rank_group_count,
+                "train_rank_pair_count": epoch_rank_pair_count,
                 "train_accuracy": train_metrics["accuracy"],
                 "train_macro_f1": train_metrics["macro_f1"],
                 "train_positive_precision": train_metrics["positive_precision"],
@@ -1028,6 +1309,13 @@ def main() -> None:
                         "tie_breaker": args.tie_breaker,
                         "holdout_ratio": args.holdout_ratio,
                         "holdout_seed": args.holdout_seed,
+                        "train_objective": args.train_objective,
+                        "rank_lambda": args.rank_lambda,
+                        "rank_tau": args.rank_tau,
+                        "rank_warmup_epochs": args.rank_warmup_epochs,
+                        "rank_min_pos": args.rank_min_pos,
+                        "rank_min_neg": args.rank_min_neg,
+                        "rank_max_pairs_per_group": args.rank_max_pairs_per_group,
                     },
                     os.path.join(seed_dir, "best.pt"),
                 )
@@ -1100,6 +1388,14 @@ def main() -> None:
         "selection_metric": args.selection_metric,
         "tie_breaker": args.tie_breaker,
         "metadata_feature_set": args.metadata_feature_set,
+        "train_objective": args.train_objective,
+        "rank_lambda": args.rank_lambda,
+        "rank_tau": args.rank_tau,
+        "rank_warmup_epochs": args.rank_warmup_epochs,
+        "rank_min_pos": args.rank_min_pos,
+        "rank_min_neg": args.rank_min_neg,
+        "rank_max_pairs_per_group": args.rank_max_pairs_per_group,
+        "train_group_summary": train_group_summaries,
         "metadata_baselines": metadata_baselines,
         "runs": seed_rows,
         "natural_summary": _aggregate_rows(

@@ -1,0 +1,74 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{hyperref}
+
+\title{Prefill Round 8: Order-Sensitive Tail Snapshot on Fixed Labels}
+\author{}
+\date{2026-03-13 17:21 UTC}
+
+\begin{document}
+\maketitle
+
+\section*{Question}
+Rounds 6--7 left the metadata-aware all-layer last-token anchor as the best prefill detector on the current one-bit target, with neither static boundary fusion nor small objective tweaks improving on it. Round 8 asked one final fixed-label representation question before moving to richer supervision: does an \textbf{order-sensitive suffix view} recover signal that pooled boundary summaries missed?
+
+\section*{Setup}
+I kept the Round 6 training frame fixed and changed only the representation.
+
+\begin{itemize}
+  \item \textbf{Labels / sample IDs}: fixed from the preserved Round 4 source-control train split and matched eval split.
+  \item \textbf{Training frame}: same metadata-aware residual MLP, same \textbf{15\%} train-side holdout, same selector (\textbf{val PR-AUC}, tie-break \textbf{macro-F1}), 3 seeds.
+  \item \textbf{New representation}: a final-layer \texttt{tail64\_strided\_concat} view that concatenates suffix token states at offsets \{64, 48, 32, 16, 8, 4, 2, 1\} plus an availability mask.
+\end{itemize}
+
+Round 8 arms:
+\begin{itemize}
+  \item \textbf{Anchor}: rebuilt all-layer last-token concat under the current extraction stack.
+  \item \textbf{Tail64}: suffix-only order-sensitive snapshot.
+  \item \textbf{Anchor + Tail64 (low-rank 256)}: anchor plus the new suffix view through a low-rank bottleneck.
+\end{itemize}
+
+\textbf{Important caveat:} the Round 8 anchor is a fresh re-extraction from raw prompts under the current code path, not a byte-identical reuse of the old saved Round 6 tensors. So the cleanest scientific comparison inside Round 8 is \emph{between the three Round 8 arms}; the older Round 6 anchor remains the stronger external reference point.
+
+\section*{Main Results}
+\begin{center}
+\small
+\setlength{\tabcolsep}{4pt}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{@{}p{4.4cm}rrrrrr@{}}
+\toprule
+Arm & Natural PR & Matched PR & Matched bin PR & $\Delta$ Matched PR vs R8 anchor & $\Delta$ Matched bin PR vs R8 anchor & $\Delta$ Matched PR vs R6 anchor \\
+\midrule
+Round 8 anchor (rebuilt) & 0.3957 & 0.6121 & 0.6198 & 0.0000 & 0.0000 & -0.0377 \\
+Tail64 strided final & 0.4064 & 0.6175 & 0.6420 & +0.0054 & +0.0222 & -0.0323 \\
+Anchor + Tail64 (low-rank 256) & 0.4057 & 0.6253 & 0.6307 & +0.0132 & +0.0108 & -0.0245 \\
+\bottomrule
+\end{tabular}
+}
+\end{center}
+
+The matched legacy metadata baseline in this Round 8 rebuild remains only \textbf{0.5464} PR-AUC, so all three hidden-state arms still retain genuine prefill signal above metadata. The question is whether the new suffix view changes the best practical direction.
+
+\section*{Interpretation}
+\begin{itemize}
+  \item \textbf{The order-sensitive suffix view does add local signal.} Within the rebuilt Round 8 matrix, the suffix-only arm improves natural PR-AUC by \textbf{+0.0108} and matched within-bin PR-AUC by \textbf{+0.0222} over the rebuilt anchor. The low-rank hybrid is best on matched PR-AUC within the round (\textbf{+0.0132} over the rebuilt anchor).
+  \item \textbf{But this is not enough to overturn the stronger earlier anchor baseline.} Every Round 8 arm remains below the reproduced Round 6 anchor. The best Round 8 arm (anchor + tail64 low-rank) is still down about \textbf{0.0245} matched PR-AUC and \textbf{0.0335} matched within-bin PR-AUC versus the Round 6 anchor.
+  \item \textbf{So the defensible claim is narrow.} Order-sensitive suffix information is \emph{real} and likely complementary, but on the current one-bit target it looks like a second-order lever rather than the main bottleneck.
+  \item \textbf{Athena's read matched this.} The right interpretation is to carry the suffix view forward as an ingredient if needed, not as justification for another open-ended representation sweep on the same target.
+\end{itemize}
+
+\section*{Bottom Line}
+Round 8 is the first fixed-label representation follow-up that shows a clear \emph{within-round} gain from preserving suffix order, so this family is not empty. But the gain is too modest to beat the earlier Round 6 anchor baseline, and the rebuilt anchor drift makes another representation-only sweep hard to justify scientifically.
+
+My recommendation for the next round is:
+\begin{itemize}
+  \item stop open-ended representation tuning on the current eventual-loop bit;
+  \item move to \textbf{richer supervision}, starting with compact onset-horizon style binary targets such as \texttt{loop\_by\_64} / \texttt{loop\_by\_128};
+  \item if a bridge diagnostic is needed later, make it a single controlled check to separate extraction drift from target limits rather than another broad representation sweep.
+\end{itemize}
+
+\end{document}

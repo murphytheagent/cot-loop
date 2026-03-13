@@ -1,6 +1,6 @@
 # Roadmap - CoT Loop Detection
 
-Last updated: 2026-03-13 13:05 UTC
+Last updated: 2026-03-13 17:04 UTC
 
 Scope:
 - Build and validate a probe pipeline for CoT loop detection across prefill and completion feature views.
@@ -11,6 +11,7 @@ Scope:
 - Milestone 2 gate: complete.
 - Active milestone: Milestone 3 (metadata-aware prefill residual validation).
 - Latest result: under the fixed Round 3 metadata-aware frame, simple boundary-summary replacements do not beat the all-layer last-token anchor, but `anchor + last16` gives a modest matched PR-AUC lift to `0.650` versus the Round 4 anchor at `0.642`.
+- Active experiment: Round 8 is running as a fixed-label order-sensitive suffix-view diagnostic (`job 1240`) to test whether preserving late prompt-token order can beat the Round 6 anchor without changing labels.
 - Active review surface: upstream PR #2 (`task/1772391564-ood-feature-ablation`) is still `OPEN` / `CLEAN` at head `50e0c9d`, but it now has `3` unresolved non-outdated review threads and no terminal local-review verdict inside the `300`-second maintenance bound.
 
 ## Milestone 1 - Pipeline and multi-view infrastructure

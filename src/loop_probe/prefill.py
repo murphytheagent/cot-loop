@@ -9,16 +9,20 @@ LAST_TOKEN_POOLING = "last_token"
 MEAN_POOLING = "mean_pool"
 LAST_TOKEN_ALL_LAYERS_MEAN = "last_token_all_layers_mean"
 LAST_TOKEN_ALL_LAYERS_CONCAT = "last_token_all_layers_concat"
+TAIL64_STRIDED_CONCAT = "tail64_strided_concat"
 LAST16_ALL_LAYERS_CONCAT = "last16_all_layers_concat"
 LAST8_PREV8_DELTA_ALL_LAYERS_CONCAT = "last8_prev8_delta_all_layers_concat"
 LAST16_MID16_DELTA_ALL_LAYERS_CONCAT = "last16_mid16_delta_all_layers_concat"
 LAST16_PLUS_DELTA8_ALL_LAYERS_CONCAT = "last16_plus_delta8_all_layers_concat"
+
+TAIL64_STRIDED_OFFSETS = (64, 48, 32, 16, 8, 4, 2, 1)
 
 FEATURE_POOLING_CHOICES = (
     LAST_TOKEN_POOLING,
     MEAN_POOLING,
     LAST_TOKEN_ALL_LAYERS_MEAN,
     LAST_TOKEN_ALL_LAYERS_CONCAT,
+    TAIL64_STRIDED_CONCAT,
     LAST16_ALL_LAYERS_CONCAT,
     LAST8_PREV8_DELTA_ALL_LAYERS_CONCAT,
     LAST16_MID16_DELTA_ALL_LAYERS_CONCAT,
@@ -139,6 +143,17 @@ def _pool_hidden_states(
         token_count = mask.sum(dim=1).clamp(min=1.0)
         return ((hidden * mask).sum(dim=1) / token_count).float().cpu()
 
+    if pooling == TAIL64_STRIDED_CONCAT:
+        batch_size, seq_len, _ = hidden.shape
+        if attention_mask is None:
+            lengths = [seq_len] * batch_size
+        else:
+            lengths = [max(int(v), 1) for v in attention_mask.sum(dim=1).tolist()]
+        outputs = []
+        for hidden_row, length in zip(hidden, lengths, strict=True):
+            outputs.append(_tail64_strided_vec(hidden_row, length=length))
+        return torch.stack(outputs, dim=0).float().cpu()
+
     raise SystemExit(
         f"Unknown feature pooling '{pooling}'. "
         f"Valid: {FEATURE_POOLING_CHOICES}"
@@ -174,6 +189,22 @@ def _middle_window_vec(hidden_row: torch.Tensor, *, length: int, window: int) ->
     start = max(min((length // 2) - (width // 2), length - width), 0)
     end = start + width
     return hidden_row[start:end].mean(dim=0)
+
+
+def _tail64_strided_vec(hidden_row: torch.Tensor, *, length: int) -> torch.Tensor:
+    hidden_dim = int(hidden_row.size(-1))
+    snapshots = []
+    mask_vals = []
+    for offset in TAIL64_STRIDED_OFFSETS:
+        pos = length - offset
+        if pos >= 0:
+            snapshots.append(hidden_row[pos])
+            mask_vals.append(1.0)
+        else:
+            snapshots.append(hidden_row.new_zeros(hidden_dim))
+            mask_vals.append(0.0)
+    mask = hidden_row.new_tensor(mask_vals, dtype=hidden_row.dtype)
+    return torch.cat([*snapshots, mask], dim=0)
 
 
 def _pool_window_summary(
@@ -341,7 +372,7 @@ def extract_prefill_features_multi(
                 num_hidden_layers = len(out.hidden_states) - 1
                 resolved_view_specs = {}
                 for key, (pooling, feature_layer) in normalized_views.items():
-                    if pooling in (LAST_TOKEN_POOLING, MEAN_POOLING):
+                    if pooling in (LAST_TOKEN_POOLING, MEAN_POOLING, TAIL64_STRIDED_CONCAT):
                         resolved_layer: int | None = _resolve_feature_layer(
                             num_hidden_layers=num_hidden_layers,
                             feature_layer=feature_layer,
@@ -351,7 +382,7 @@ def extract_prefill_features_multi(
                     resolved_view_specs[key] = (pooling, resolved_layer)
 
             for key, (pooling, resolved_layer) in resolved_view_specs.items():
-                if pooling in (LAST_TOKEN_POOLING, MEAN_POOLING):
+                if pooling in (LAST_TOKEN_POOLING, MEAN_POOLING, TAIL64_STRIDED_CONCAT):
                     if resolved_layer is None:
                         raise RuntimeError(
                             f"Resolved layer is missing for pooling '{pooling}'."

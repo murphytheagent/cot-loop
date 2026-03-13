@@ -21,7 +21,7 @@ if SRC not in sys.path:
 
 from loop_probe.configs import get_rollout_config, preset_choices
 from loop_probe.hf_data import load_prompt_records, specs_equal, split_records
-from loop_probe.labeling import labels_from_rollouts
+from loop_probe.labeling import LABEL_TARGET_CHOICES, labels_from_rollouts
 from loop_probe.prefill import (
     FEATURE_POOLING_CHOICES,
     extract_prefill_features_multi,
@@ -98,6 +98,25 @@ def _parse_args() -> argparse.Namespace:
 
     parser.add_argument("--loop-n", type=int, default=30)
     parser.add_argument("--loop-k", type=int, default=20)
+    parser.add_argument(
+        "--label-target",
+        choices=LABEL_TARGET_CHOICES,
+        default="eventual_loop",
+        help=(
+            "How to derive binary labels from rollouts. "
+            "'eventual_loop' matches the legacy eventual-loop bit; "
+            "'loop_by_horizon' marks prompts whose rollout enters a loop "
+            "within the first --label-horizon generated tokens."
+        ),
+    )
+    parser.add_argument(
+        "--label-horizon",
+        type=int,
+        default=None,
+        help=(
+            "Positive token horizon used when --label-target=loop_by_horizon."
+        ),
+    )
     parser.add_argument("--shard-size", type=int, default=2048)
     parser.add_argument("--prefill-batch-size", type=int, default=1)
     parser.add_argument(
@@ -524,6 +543,7 @@ def _probe_cache_status(
     split_ratio: float,
     loop_n: int,
     loop_k: int,
+    label_spec: dict[str, object],
     rollout_config: dict[str, object],
     requested_primary_feature_key: str,
     requested_feature_views: dict[str, dict[str, object]],
@@ -555,6 +575,16 @@ def _probe_cache_status(
     for key, value in expected.items():
         if manifest.get(key) != value:
             return False, f"manifest mismatch on '{key}'"
+
+    manifest_label_spec = manifest.get(
+        "label_spec",
+        {
+            "target": "eventual_loop",
+            "horizon": None,
+        },
+    )
+    if manifest_label_spec != label_spec:
+        return False, "manifest mismatch on 'label_spec'"
 
     expected_balancing = {
         "train": balance_train,
@@ -701,6 +731,8 @@ def _label_split(
     seed: int,
     loop_n: int,
     loop_k: int,
+    label_target: str,
+    label_horizon: int | None,
     return_rollout_token_ids: bool = True,
 ) -> tuple[list[int], list[list[int]] | None]:
     print(f"[{split_name}] running rollouts for {len(prompts)} prompts", flush=True)
@@ -713,6 +745,8 @@ def _label_split(
         rollout_token_ids,
         loop_n=loop_n,
         loop_k=loop_k,
+        label_target=label_target,
+        label_horizon=label_horizon,
     )
     if not return_rollout_token_ids:
         return labels, None
@@ -878,6 +912,26 @@ def _subset_list(values: list[int], keep_indices: list[int]) -> list[int]:
     return [values[idx] for idx in keep_indices]
 
 
+def _resolve_label_spec(args: argparse.Namespace) -> dict[str, object]:
+    label_target = str(args.label_target)
+    label_horizon = args.label_horizon
+    if label_target == "loop_by_horizon":
+        if label_horizon is None or label_horizon < 1:
+            raise SystemExit(
+                "--label-horizon must be a positive integer when "
+                "--label-target=loop_by_horizon."
+            )
+    elif label_horizon is not None:
+        raise SystemExit(
+            "--label-horizon is only valid when "
+            "--label-target=loop_by_horizon."
+        )
+    return {
+        "target": label_target,
+        "horizon": label_horizon,
+    }
+
+
 def main() -> None:
     args = _parse_args()
 
@@ -904,6 +958,7 @@ def main() -> None:
     prefill_feature_views, completion_feature_views = _split_feature_views_by_stage(
         feature_views
     )
+    label_spec = _resolve_label_spec(args)
     balance_seed = args.seed if args.balance_seed is None else args.balance_seed
 
     if args.reuse_if_compatible:
@@ -916,6 +971,7 @@ def main() -> None:
             split_ratio=args.split_ratio,
             loop_n=args.loop_n,
             loop_k=args.loop_k,
+            label_spec=label_spec,
             rollout_config=rollout_cfg.to_dict(),
             requested_primary_feature_key=primary_feature_key,
             requested_feature_views=feature_views,
@@ -936,11 +992,15 @@ def main() -> None:
         )
 
     train_records, test_records, split_source = _resolve_splits(args, train_spec, test_spec)
+    label_desc = str(label_spec["target"])
+    if label_spec["horizon"] is not None:
+        label_desc = f"{label_desc}@{label_spec['horizon']}"
 
     print(
         f"Building probe dataset with model={rollout_cfg.model_id}, "
         f"train={len(train_records)}, test={len(test_records)}, "
-        f"feature_views={list(feature_views.keys())}",
+        f"feature_views={list(feature_views.keys())}, "
+        f"label_target={label_desc}",
         flush=True,
     )
 
@@ -999,6 +1059,12 @@ def main() -> None:
         seed=args.seed,
         loop_n=args.loop_n,
         loop_k=args.loop_k,
+        label_target=str(label_spec["target"]),
+        label_horizon=(
+            int(label_spec["horizon"])
+            if label_spec["horizon"] is not None
+            else None
+        ),
         return_rollout_token_ids=need_rollout_tokens,
     )
     split_at = len(train_prompts)
@@ -1170,6 +1236,7 @@ def main() -> None:
             "n": args.loop_n,
             "k": args.loop_k,
         },
+        "label_spec": label_spec,
         "balancing": {
             "train": args.balance_train,
             "test": args.balance_test,

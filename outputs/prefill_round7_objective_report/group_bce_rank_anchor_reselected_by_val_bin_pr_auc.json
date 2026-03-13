@@ -1,0 +1,34 @@
+{
+  "selection_rule": "max(val_bin_pr_auc), tie_break=max(val_pr_auc)",
+  "summary": {
+    "natural_pr_auc": {
+      "mean": 0.4022560140338347,
+      "std": 0.005449717207746121
+    },
+    "natural_roc_auc": {
+      "mean": 0.7422309070184009,
+      "std": 0.005370850888155287
+    },
+    "natural_bin_pr_auc": {
+      "mean": 0.389616421442245,
+      "std": 0.0025837514251864334
+    },
+    "matched_pr_auc": {
+      "mean": 0.6143852653913146,
+      "std": 0.010667883704820531
+    },
+    "matched_roc_auc": {
+      "mean": 0.6585003150598614,
+      "std": 0.015843751159031746
+    },
+    "matched_bin_pr_auc": {
+      "mean": 0.610197805261969,
+      "std": 0.007679145910089338
+    }
+  },
+  "epochs": [
+    4,
+    3,
+    3
+  ]
+}
