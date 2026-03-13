@@ -1,0 +1,254 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{hyperref}
+\usepackage{longtable}
+\title{CoT Loop Detection PR \#2\\Consolidated Experiment Results}
+\author{}
+\date{2026-03-05 18:16 UTC}
+
+\begin{document}
+\maketitle
+
+\section*{Scope}
+This document consolidates the completed experiment results and findings for PR \#2 in \texttt{cot-loop}. Scope covered: 2026-03-01 19:00 UTC through 2026-03-05 18:16 UTC.
+
+\section*{Fixed Setup Used for Main Comparisons}
+\begin{itemize}
+  \item Base model preset: \texttt{openthinker3\_1p5b}
+  \item Loop labeling: \texttt{n=30}, default threshold focus on \texttt{k=20}
+  \item Probe family: MLP and linear probes (depending on round)
+  \item Primary metrics: ROC-AUC, PR-AUC, macro-F1, positive-class precision/recall/F1, prevalence
+\end{itemize}
+
+\section*{Round A: Initial Threshold/Architecture Matrix (Before Horizon Fix)}
+\begin{center}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Run & Accuracy & Macro-F1 & ROC-AUC \\
+\midrule
+k10-mlp & 0.96667 & 0.49153 & 0.28448 \\
+k10-linear & 0.70000 & 0.41176 & 0.56034 \\
+k20-mlp & 1.00000 & 1.00000 & nan \\
+k20-linear & 0.71667 & 0.41748 & nan \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Key finding: \texttt{k=20} test split had \texttt{0/60} positives with short decode horizon (\texttt{max\_tokens=2048}), making discrimination metrics degenerate at \texttt{k=20}.
+
+\section*{Round B: Decode-Horizon Correction (max\_tokens=30000)}
+\begin{center}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Run & Accuracy & Macro-F1 & ROC-AUC \\
+\midrule
+k20tok30k-mlp & 0.43333 & 0.43270 & 0.65994 \\
+k20tok30k-linear & 0.51667 & 0.41513 & 0.44099 \\
+k10tok30k-mlp & 0.45000 & 0.41333 & 0.60517 \\
+k10tok30k-linear & 0.58333 & 0.54696 & 0.50881 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Label coverage after correction:
+\begin{itemize}
+  \item \texttt{k=20 tok30000}: \texttt{14/60} positives
+  \item \texttt{k=10 tok30000}: \texttt{23/60} positives
+\end{itemize}
+
+\noindent
+Key finding: with matched token budget and restored positive coverage, MLP ROC-AUC exceeds linear at both thresholds.
+
+\section*{Round C: Locked k20/tok30000 Feature ID-vs-OOD Ablation (MLP)}
+OOD split: train on MATH-500 and evaluate on AIME.\\
+ID split: disjoint MATH-500 train/test.
+
+\begin{center}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Feature view & OOD ROC-AUC & ID ROC-AUC & ID-OOD & ID positives \\
+\midrule
+last\_token\_final & 0.6521 & 0.5370 & -0.1151 & 6/60 \\
+mean\_pool\_final & 0.4603 & 0.7818 & +0.3215 & 5/60 \\
+last\_token\_layer14 & 0.6105 & 0.7310 & +0.1205 & 3/60 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Caveat: each feature run rebuilt labels independently, and ID positives were sparse (3--6/60), so this round is directional rather than strictly apples-to-apples.
+
+\section*{Round D: Matched-Label Shared-View Comparison (n=3 seeds)}
+Shared dataset was built once and reused for both final-layer views, yielding identical eval labels (\texttt{17/60} positives).
+
+\begin{center}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Feature view & ROC-AUC (mean$\pm$std) & PR-AUC (mean$\pm$std) & Macro-F1 (mean$\pm$std) & Accuracy (mean$\pm$std) \\
+\midrule
+last\_token\_final & 0.5723$\pm$0.0909 & 0.3684$\pm$0.0803 & 0.3866$\pm$0.0621 & 0.3944$\pm$0.0567 \\
+mean\_pool\_final & 0.5695$\pm$0.0553 & 0.3892$\pm$0.0701 & 0.3176$\pm$0.1369 & 0.4000$\pm$0.1650 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Key findings on matched labels:
+\begin{itemize}
+  \item ROC-AUC is effectively tied between \texttt{last\_token\_final} and \texttt{mean\_pool\_final}.
+  \item \texttt{mean\_pool\_final} is slightly higher on PR-AUC in this run.
+  \item \texttt{last\_token\_final} is more stable and better on average macro-F1.
+  \item Accuracy is non-primary under imbalance (majority baseline here is \texttt{43/60 = 0.7167}).
+\end{itemize}
+
+\section*{Round E: Data-First Scope Correction + Official RFM Comparison}
+ID balanced dataset: \texttt{22/44} positives. OOD dataset: \texttt{10/200} positives (majority baseline accuracy \texttt{0.95}).
+
+\noindent
+ID results (n=3 seeds):
+\begin{center}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Model & ROC-AUC (mean$\pm$std) & PR-AUC (mean$\pm$std) \\
+\midrule
+MLP + \texttt{last\_token\_final} & 0.6550$\pm$0.1643 & 0.6860$\pm$0.1511 \\
+MLP + \texttt{mean\_pool\_final} & 0.6453$\pm$0.0969 & 0.6974$\pm$0.1077 \\
+official RFM + \texttt{last\_token\_final} & 0.5124$\pm$0.0000 & 0.5509$\pm$0.0000 \\
+official RFM + \texttt{mean\_pool\_final} & 0.3623$\pm$0.0012 & 0.4238$\pm$0.0005 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+OOD results (n=3 seeds):
+\begin{center}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Model & ROC-AUC (mean$\pm$std) & PR-AUC (mean$\pm$std) \\
+\midrule
+MLP + \texttt{last\_token\_final} & 0.5933$\pm$0.0301 & 0.0842$\pm$0.0107 \\
+MLP + \texttt{mean\_pool\_final} & 0.4747$\pm$0.0267 & 0.0598$\pm$0.0045 \\
+official RFM + \texttt{last\_token\_final} & 0.6270$\pm$0.0003 & 0.0936$\pm$0.0001 \\
+official RFM + \texttt{mean\_pool\_final} & 0.4474$\pm$0.0000 & 0.0564$\pm$0.0006 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Key finding: OOD detection remains weak overall; \texttt{last\_token\_final} remains the strongest practical baseline for continued ablations.
+
+\section*{Round F: Larger Multi-Source Rebuild (Canceled)}
+Run \texttt{743} built and deduplicated a \texttt{29,482}-prompt pool but was canceled after explicit \texttt{!stop}; no final metrics were produced.
+
+\section*{Round G: k=5 Three-View Dataset + Posterior-First Ablation (Completed)}
+Request: \texttt{k=5}, \texttt{max\_tokens=15000}, train cap \texttt{<=5000} (balanced across sources), eval natural \texttt{MATH-500 + AIME24/25}.
+
+\begin{itemize}
+  \item Feature views: \texttt{prefill\_lasttok\_layers\_mean}, \texttt{prefill\_lasttok\_layers\_concat}, \texttt{rollout\_lasttok\_layers\_mean}.
+  \item Dataset stats: train \texttt{3326} samples (balanced \texttt{1663/1663}), test \texttt{560} samples (\texttt{115} positives, prevalence \texttt{0.2054}), input dims mean=1536 concat=43008.
+  \item Job timeline: \texttt{809} failed immediately (missing runtime env); requeued with explicit conda env and data-volume outputs; \texttt{811} completed at 2026-03-05 16:11 UTC; \texttt{812} completed at 2026-03-05 16:15 UTC.
+\end{itemize}
+
+\noindent
+Posterior (completion) view results, n=3 seeds (mean$\pm$std):
+\begin{center}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Run & Accuracy & Macro-F1 & ROC-AUC & PR-AUC \\
+\midrule
+completion\_mean\_h128\_d1 & 0.8655$\pm$0.0021 & 0.8022$\pm$0.0044 & 0.9219$\pm$0.0026 & 0.8045$\pm$0.0030 \\
+completion\_mean\_h256\_d2 & 0.8631$\pm$0.0045 & 0.8048$\pm$0.0045 & 0.9211$\pm$0.0035 & 0.8057$\pm$0.0071 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Posterior positive-class metrics (mean$\pm$std):
+\begin{center}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Run & Pos-Prec & Pos-Rec & Pos-F1 \\
+\midrule
+completion\_mean\_h128\_d1 & 0.6545$\pm$0.0017 & 0.7304$\pm$0.0151 & 0.6904$\pm$0.0076 \\
+completion\_mean\_h256\_d2 & 0.6381$\pm$0.0127 & 0.7710$\pm$0.0050 & 0.6982$\pm$0.0057 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Prefill view results, n=3 seeds (mean$\pm$std):
+\begin{center}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Run & Accuracy & Macro-F1 & ROC-AUC & PR-AUC \\
+\midrule
+prefill\_layers\_mean\_h256\_d2 & 0.7756$\pm$0.0027 & 0.6671$\pm$0.0017 & 0.7332$\pm$0.0010 & 0.4292$\pm$0.0014 \\
+prefill\_layers\_concat\_h512\_d2 & 0.7786$\pm$0.0064 & 0.6768$\pm$0.0043 & 0.7503$\pm$0.0031 & 0.4607$\pm$0.0085 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Prefill positive-class metrics (mean$\pm$std):
+\begin{center}
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Run & Pos-Prec & Pos-Rec & Pos-F1 \\
+\midrule
+prefill\_layers\_mean\_h256\_d2 & 0.4576$\pm$0.0042 & 0.4986$\pm$0.0181 & 0.4770$\pm$0.0061 \\
+prefill\_layers\_concat\_h512\_d2 & 0.4663$\pm$0.0104 & 0.5304$\pm$0.0398 & 0.4955$\pm$0.0129 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Key finding: posterior (completion) features are materially stronger than prefill views under the same labels; prefill concat lifts recall but still lags on macro-F1/PR-AUC.
+\newline
+\noindent\textit{Note: metrics recomputed using macro-F1/positive-F1 checkpoint selection after fixing the aggregation selection logic.}
+
+\section*{Consolidated Findings}
+\begin{itemize}
+  \item Decode horizon is critical for label validity; short horizons can collapse positives (e.g., \texttt{max\_tokens=2048} for \texttt{k=20}).
+  \item ROC-AUC should be retained but never alone under imbalance; PR-AUC and positive-class metrics are required.
+  \item Earlier ID--OOD deltas were confounded by sparse positives; matched-label datasets are required for fair view comparisons.
+  \item Final-layer views are close on ROC-AUC; \texttt{last\_token\_final} is more stable on macro-F1 while \texttt{mean\_pool\_final} can lift PR-AUC.
+  \item In the k=5 three-view study, posterior (completion) features yield strong macro-F1 ($\sim$0.80), while prefill views sit around $\sim$0.67 with positive precision/recall in the $\sim$0.46--0.53 range.
+  \item OOD performance remains the bottleneck under current labels; gains likely need data/label improvements before larger models.
+\end{itemize}
+
+\section*{Current PR \#2 Codebase State}
+\begin{itemize}
+  \item Shared multi-view dataset build so one rollout-label pass can feed multiple feature views.
+  \item Feature-key aware training/evaluation paths for selecting a specific view from shared datasets.
+  \item Imbalance-aware metrics added to evaluation logging (PR-AUC, positive-class precision/recall/F1, prevalence).
+  \item Official RFM runner integration and result artifacts.
+  \item New k=5 three-view feature modes and mixed-stage (prefill + completion) extraction.
+  \item MLP architecture controls (hidden dim, depth, dropout) plus k=5 dataset/ablation SLURM launchers.
+  \item Rollout data-parallel IPC hardened to avoid semaphore rebuild failures.
+  \item Runtime hardening: canonicalized cache guard for HOME, prefill-only builds skip retaining rollout token IDs, and explicit \texttt{--probe-preset} is required when a checkpoint lacks \texttt{probe\_config}.
+  \item Aggregation now reselects from \texttt{metrics.jsonl} whenever selection/tie-breaker differ or cannot be inferred, preventing stale default summaries.
+  \item RFM training now falls back to a best-row selection when all ranking metrics are NaN.
+  \item Completion-view prompt+rollout merges are now built per batch to reduce host RAM pressure.
+  \item Completion-view prompts are tokenized per batch (aligned with \texttt{--completion-batch-size}) to avoid full-split materialization and OOM.
+\end{itemize}
+
+\section*{Recommended Next Step}
+Now that the k=5 three-view ablation is complete, decide whether to invest in stronger prefill modeling (richer aggregators or larger MLPs) or scale the multi-source dataset rebuild under the same fixed label protocol and metrics.
+
+\section*{Run Links (Representative)}
+\begin{itemize}
+  \item k20tok30k MLP: \url{https://wandb.ai/wth_ucsd/cot-loop-probe/runs/soqtbttg}
+  \item k20tok30k Linear: \url{https://wandb.ai/wth_ucsd/cot-loop-probe/runs/rlb14to8}
+  \item k10tok30k MLP: \url{https://wandb.ai/wth_ucsd/cot-loop-probe/runs/8p88mi8m}
+  \item k10tok30k Linear: \url{https://wandb.ai/wth_ucsd/cot-loop-probe/runs/v6jz4hr1}
+  \item OOD last\_token\_final: \url{https://wandb.ai/wth_ucsd/cot-loop-probe/runs/pzce5mcr}
+  \item ID last\_token\_final: \url{https://wandb.ai/wth_ucsd/cot-loop-probe/runs/6njf7chg}
+  \item OOD mean\_pool\_final: \url{https://wandb.ai/wth_ucsd/cot-loop-probe/runs/k9qe146k}
+  \item ID mean\_pool\_final: \url{https://wandb.ai/wth_ucsd/cot-loop-probe/runs/ej6255kd}
+\end{itemize}
+
+\end{document}

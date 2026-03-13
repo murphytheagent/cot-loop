@@ -1,0 +1,84 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{hyperref}
+
+\title{Prefill Round 1: Composition-Controlled Follow-up on k=5 Prompt-Only Detection}
+\author{}
+\date{2026-03-13 09:30 UTC}
+
+\begin{document}
+\maketitle
+
+\section*{Question}
+The completion-view result is strong, but the real target is prefill-only classification.
+This round asked whether the surviving prefill signal in Round G reflects genuine prompt-time hidden-state information, or whether a substantial fraction comes from coarse dataset structure such as source mix and prompt length.
+
+\section*{Starting Point}
+Round G used the same k=5 labels for all views and reported the best prefill result from the all-layer prefill concat view:
+\begin{itemize}
+  \item Test set: 560 natural-distribution examples from MATH-500 + AIME 2024/2025, with 115 positives (prevalence 0.2054).
+  \item Baseline prefill model: all-layer prefill concat + MLP.
+  \item Baseline metrics (mean $\pm$ std over 3 seeds): macro-F1 $0.6641 \pm 0.0172$, PR-AUC $0.4737 \pm 0.0042$, ROC-AUC $0.7520 \pm 0.0017$, positive precision $0.4663 \pm 0.0104$, positive recall $0.5304 \pm 0.0398$, positive F1 $0.4955 \pm 0.0129$.
+\end{itemize}
+
+\section*{Pre-Training Audit}
+Before retraining any probes, I checked how much signal is available from prompt metadata alone on the preserved k=5 dataset.
+\begin{itemize}
+  \item A metadata-only logistic baseline using only source, prompt length, newline count, digit count, and LaTeX-dollar count reached ROC-AUC 0.6590 and PR-AUC 0.3360 on the same natural test set.
+  \item In the balanced train set, positive prompts were longer than negative prompts in every source.
+  \item Source prevalences in the balanced train set were still uneven: competition-math 0.2847, OpenR1-Math 0.5452, GSM8K 0.5921.
+\end{itemize}
+This made it plausible that the current prompt-only probe is exploiting source/length structure in addition to any genuine hidden-state signal.
+
+\section*{Experiment Design}
+I kept the natural test set fixed and reused the existing all-layer prefill concat features. The follow-up varied only the \emph{training composition}.
+
+Two training subsets were built from the existing Round G train split:
+\begin{enumerate}
+  \item \textbf{Math-only}: remove GSM8K and keep only competition-math + OpenR1-Math examples. This leaves 2,571 train examples (1,216 positive / 1,355 negative).
+  \item \textbf{Math-only + source/length matched}: within each math source, pair positives and negatives by prompt-length order, yielding 2,096 train examples (1,048 positive / 1,048 negative).
+\end{enumerate}
+
+For each subset, I trained:
+\begin{itemize}
+  \item \textbf{Linear probe}: 15 epochs, batch size 256, learning rate $10^{-3}$.
+  \item \textbf{MLP}: hidden size 512, depth 2, dropout 0.1, 15 epochs, batch size 64, learning rate $10^{-4}$, weight decay 0.03.
+\end{itemize}
+All summaries below use the same checkpoint-selection rule as Round G reporting: maximize macro-F1, tie-break by positive F1, then average over 3 seeds.
+
+\section*{Results}
+\begin{center}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}p{3.2cm}rrrrr@{}}
+\toprule
+Train setup & Macro-F1 & PR-AUC & ROC-AUC & Pos. Prec. & Pos. Rec. \\
+\midrule
+Round G baseline (all-source MLP) & 0.6641 $\pm$ 0.0172 & 0.4737 $\pm$ 0.0042 & 0.7520 $\pm$ 0.0017 & 0.4663 $\pm$ 0.0104 & 0.5304 $\pm$ 0.0398 \\
+Math-only linear & 0.6709 $\pm$ 0.0194 & 0.4587 $\pm$ 0.0350 & 0.7303 $\pm$ 0.0161 & 0.5187 $\pm$ 0.0442 & 0.4377 $\pm$ 0.1008 \\
+Math-only MLP & 0.6782 $\pm$ 0.0086 & 0.4704 $\pm$ 0.0302 & 0.7482 $\pm$ 0.0060 & 0.4780 $\pm$ 0.0458 & 0.5217 $\pm$ 0.0529 \\
+Math-only matched linear & 0.6217 $\pm$ 0.0218 & 0.3961 $\pm$ 0.0227 & 0.6996 $\pm$ 0.0147 & 0.3755 $\pm$ 0.0449 & 0.5362 $\pm$ 0.0922 \\
+Math-only matched MLP & 0.6335 $\pm$ 0.0031 & 0.4092 $\pm$ 0.0074 & 0.7172 $\pm$ 0.0043 & 0.3835 $\pm$ 0.0010 & 0.5391 $\pm$ 0.0261 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section*{Interpretation}
+\begin{itemize}
+  \item \textbf{Dropping GSM8K alone does not collapse prompt-only performance.} The math-only MLP nearly matches the original all-source baseline on PR-AUC and positive F1, so GSM8K was not carrying the entire effect.
+  \item \textbf{Source/length matching materially reduces performance.} Both linear and MLP probes lose about 0.06 PR-AUC and about 0.03--0.05 macro-F1 relative to the baseline/math-only runs once coarse source and prompt-length structure is controlled.
+  \item \textbf{A residual prefill signal remains after matching.} The matched MLP still stays above the metadata-only baseline (PR-AUC 0.409 vs 0.336; ROC-AUC 0.717 vs 0.659), so the all-layer prefill representation is not merely recoding source and length.
+  \item \textbf{Architecture scaling is not the main bottleneck on the current feature family.} On the unconstrained math-only subset, linear is already close to the MLP. On the matched subset, the MLP helps modestly, but the overall loss from confound control is larger than the gain from extra nonlinearity.
+\end{itemize}
+
+\section*{Bottom Line}
+This round shifts the diagnosis. The current prefill detector is \emph{not} just random guessing, but a substantial fraction of its remaining lift comes from coarse prompt-level structure that is easier to exploit than genuine loop propensity. The next high-value round should therefore prioritize either:
+\begin{enumerate}
+  \item richer prefill features that summarize prompt-wide model state better than last-token concat, or
+  \item cleaner targets (for example, repeated-rollout risk or an earlier/harmful loop subtype),
+\end{enumerate}
+rather than spending more budget on larger MLPs over the same prefill view.
+
+\end{document}

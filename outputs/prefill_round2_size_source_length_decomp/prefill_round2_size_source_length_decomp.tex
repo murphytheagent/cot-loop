@@ -1,0 +1,89 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{hyperref}
+
+\title{Prefill Round 2: Decomposing Size, Source, and Length Confounding on k=5 Prompt-Only Detection}
+\author{}
+\date{2026-03-13 10:33 UTC}
+
+\begin{document}
+\maketitle
+
+\section*{Question}
+Round 1 showed that the all-layer prefill last-token concat probe stays above a metadata-only baseline, but drops materially once train positives and negatives are matched by source and prompt length. The unresolved question was \emph{which part} of that drop is actually due to stronger confound control:
+\begin{enumerate}
+  \item fewer train examples,
+  \item source balancing, or
+  \item prompt-length control on top of source balancing.
+\end{enumerate}
+
+\section*{Setup}
+I reused the preserved Round G k=5 prefill-concat features and natural test set, so this round required no new rollouts.
+
+Train arms:
+\begin{itemize}
+  \item \textbf{A. Math-only}: existing competition-math + OpenR1-Math subset, 2{,}571 train examples.
+  \item \textbf{B. Size-control}: random balanced 2{,}096-example subset of A.
+  \item \textbf{C. Source-control}: same 2{,}096 size as B, and the same per-source/per-class counts as the length-matched arm, but sampled randomly over prompt lengths.
+  \item \textbf{D. Length-matched}: existing 2{,}096-example source+length-matched subset.
+\end{itemize}
+
+Eval views:
+\begin{itemize}
+  \item \textbf{Natural test}: the preserved Round G natural-distribution test set (560 examples, 115 positives).
+  \item \textbf{Matched test}: a new 230-example eval slice built from the same natural test set by pairing each positive with a nearest-length negative within source (115 positives, 115 negatives).
+\end{itemize}
+
+All hidden-state results below use the same MLP configuration as the best Round 1 prompt-only arm and the same checkpoint-selection rule (maximize macro-F1, tie-break by positive F1, average over 3 seeds). Metadata baselines are logistic models trained on `source + prompt length + newline count + digit count + LaTeX-dollar count`.
+
+\section*{Natural-Test Results}
+\begin{center}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}p{2.5cm}rrrrrrr@{}}
+\toprule
+Arm & Train $n$ & Hidden PR & Meta PR & $\Delta$PR & Hidden ROC & Meta ROC & $\Delta$ROC \\
+\midrule
+Math-only & 2571 & 0.4704 & 0.3354 & 0.1350 & 0.7482 & 0.6591 & 0.0890 \\
+Size-control & 2096 & 0.4579 & 0.3357 & 0.1222 & 0.7430 & 0.6604 & 0.0827 \\
+Source-control & 2096 & 0.4562 & 0.3344 & 0.1218 & 0.7498 & 0.6566 & 0.0932 \\
+Length-matched & 2096 & 0.4092 & 0.3328 & 0.0764 & 0.7172 & 0.6488 & 0.0685 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section*{Matched-Test Results}
+\begin{center}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}p{2.5cm}rrrrrr@{}}
+\toprule
+Arm & Hidden PR & Meta PR & $\Delta$PR & Hidden ROC & Meta ROC & $\Delta$ROC \\
+\midrule
+Math-only & 0.7020 & 0.5520 & 0.1500 & 0.6935 & 0.5470 & 0.1465 \\
+Size-control & 0.6605 & 0.5490 & 0.1115 & 0.6733 & 0.5421 & 0.1312 \\
+Source-control & 0.6780 & 0.5484 & 0.1296 & 0.6966 & 0.5408 & 0.1559 \\
+Length-matched & 0.6211 & 0.5382 & 0.0829 & 0.6205 & 0.5237 & 0.0968 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section*{Interpretation}
+\begin{itemize}
+  \item \textbf{Train-size loss is not the main explanation.} Moving from A to B cuts 475 train examples, but hidden PR-AUC on the natural test only drops from 0.4704 to 0.4579.
+  \item \textbf{Source balancing alone is not the main explanation either.} Arms B and C have the same train size, and C matches D's per-source/per-class counts, yet C stays close to B on the natural test and clearly above D on both eval views.
+  \item \textbf{Prompt-length control is the dominant confound uncovered in this round.} The major remaining drop is the C $\rightarrow$ D step: natural PR-AUC falls from 0.4562 to 0.4092, and matched-test PR-AUC falls from 0.6780 to 0.6211.
+  \item \textbf{Residual prompt-time signal still survives after the stronger control.} Even D remains above the metadata baseline on both eval views: +0.076 PR-AUC / +0.068 ROC-AUC on the natural test, and +0.083 PR-AUC / +0.097 ROC-AUC on the matched test.
+  \item \textbf{Source-control and length-matched have the same source composition, so the remaining gap is genuinely about length.} For example, competition-math negatives average about 198 prompt characters in source-control but only about 75 in the length-matched arm; OpenR1 positives average about 317 characters in source-control versus about 254 in the length-matched arm.
+\end{itemize}
+
+\section*{Bottom Line}
+Round 2 sharpens the diagnosis from Round 1. The material loss in prompt-only performance is \emph{not} mostly an artifact of smaller training sets, and it is \emph{not} mostly an artifact of source reweighting by itself. The dominant shortcut exposed here is prompt length. The next high-value round should therefore target \emph{length-robust residual signal}, not another broad composition sweep:
+\begin{enumerate}
+  \item train hidden-state models as residual corrections over metadata, or with within-bin ranking losses inside source$\times$length strata; and/or
+  \item try prompt-time summaries that are less length-coded than single-boundary last-token concat, such as boundary-window pooling or late-versus-early drift features.
+\end{enumerate}
+
+\end{document}

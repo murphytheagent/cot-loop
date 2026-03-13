@@ -1,0 +1,142 @@
+{
+  "mathonly": {
+    "num_samples": 2571,
+    "num_positive": 1216,
+    "num_negative": 1355,
+    "source_counts": {
+      "SuperSecureHuman/competition_math_hf_dataset": 713,
+      "open-r1/OpenR1-Math-220k": 1858
+    },
+    "source_label_length_stats": {
+      "SuperSecureHuman/competition_math_hf_dataset|0": {
+        "n": 510,
+        "mean_prompt_len_chars": 208.21372549019608,
+        "min_prompt_len_chars": 17,
+        "max_prompt_len_chars": 2080
+      },
+      "SuperSecureHuman/competition_math_hf_dataset|1": {
+        "n": 203,
+        "mean_prompt_len_chars": 334.9310344827586,
+        "min_prompt_len_chars": 17,
+        "max_prompt_len_chars": 2060
+      },
+      "open-r1/OpenR1-Math-220k|0": {
+        "n": 845,
+        "mean_prompt_len_chars": 248.45562130177515,
+        "min_prompt_len_chars": 31,
+        "max_prompt_len_chars": 1320
+      },
+      "open-r1/OpenR1-Math-220k|1": {
+        "n": 1013,
+        "mean_prompt_len_chars": 323.5340572556762,
+        "min_prompt_len_chars": 18,
+        "max_prompt_len_chars": 4161
+      }
+    }
+  },
+  "sizectrl": {
+    "num_samples": 2096,
+    "num_positive": 1048,
+    "num_negative": 1048,
+    "source_counts": {
+      "open-r1/OpenR1-Math-220k": 1517,
+      "SuperSecureHuman/competition_math_hf_dataset": 579
+    },
+    "source_label_length_stats": {
+      "SuperSecureHuman/competition_math_hf_dataset|0": {
+        "n": 400,
+        "mean_prompt_len_chars": 210.7975,
+        "min_prompt_len_chars": 17,
+        "max_prompt_len_chars": 2080
+      },
+      "SuperSecureHuman/competition_math_hf_dataset|1": {
+        "n": 179,
+        "mean_prompt_len_chars": 324.54748603351953,
+        "min_prompt_len_chars": 27,
+        "max_prompt_len_chars": 1954
+      },
+      "open-r1/OpenR1-Math-220k|0": {
+        "n": 648,
+        "mean_prompt_len_chars": 248.79320987654322,
+        "min_prompt_len_chars": 39,
+        "max_prompt_len_chars": 1320
+      },
+      "open-r1/OpenR1-Math-220k|1": {
+        "n": 869,
+        "mean_prompt_len_chars": 325.0529344073648,
+        "min_prompt_len_chars": 18,
+        "max_prompt_len_chars": 4161
+      }
+    }
+  },
+  "sourcectrl": {
+    "num_samples": 2096,
+    "num_positive": 1048,
+    "num_negative": 1048,
+    "source_counts": {
+      "SuperSecureHuman/competition_math_hf_dataset": 406,
+      "open-r1/OpenR1-Math-220k": 1690
+    },
+    "source_label_length_stats": {
+      "SuperSecureHuman/competition_math_hf_dataset|0": {
+        "n": 203,
+        "mean_prompt_len_chars": 198.0295566502463,
+        "min_prompt_len_chars": 24,
+        "max_prompt_len_chars": 1905
+      },
+      "SuperSecureHuman/competition_math_hf_dataset|1": {
+        "n": 203,
+        "mean_prompt_len_chars": 334.9310344827586,
+        "min_prompt_len_chars": 17,
+        "max_prompt_len_chars": 2060
+      },
+      "open-r1/OpenR1-Math-220k|0": {
+        "n": 845,
+        "mean_prompt_len_chars": 248.45562130177515,
+        "min_prompt_len_chars": 31,
+        "max_prompt_len_chars": 1320
+      },
+      "open-r1/OpenR1-Math-220k|1": {
+        "n": 845,
+        "mean_prompt_len_chars": 316.60473372781064,
+        "min_prompt_len_chars": 18,
+        "max_prompt_len_chars": 2454
+      }
+    }
+  },
+  "lenmatched": {
+    "num_samples": 2096,
+    "num_positive": 1048,
+    "num_negative": 1048,
+    "source_counts": {
+      "SuperSecureHuman/competition_math_hf_dataset": 406,
+      "open-r1/OpenR1-Math-220k": 1690
+    },
+    "source_label_length_stats": {
+      "SuperSecureHuman/competition_math_hf_dataset|0": {
+        "n": 203,
+        "mean_prompt_len_chars": 75.26600985221675,
+        "min_prompt_len_chars": 17,
+        "max_prompt_len_chars": 119
+      },
+      "SuperSecureHuman/competition_math_hf_dataset|1": {
+        "n": 203,
+        "mean_prompt_len_chars": 334.9310344827586,
+        "min_prompt_len_chars": 17,
+        "max_prompt_len_chars": 2060
+      },
+      "open-r1/OpenR1-Math-220k|0": {
+        "n": 845,
+        "mean_prompt_len_chars": 248.45562130177515,
+        "min_prompt_len_chars": 31,
+        "max_prompt_len_chars": 1320
+      },
+      "open-r1/OpenR1-Math-220k|1": {
+        "n": 845,
+        "mean_prompt_len_chars": 253.82485207100592,
+        "min_prompt_len_chars": 18,
+        "max_prompt_len_chars": 477
+      }
+    }
+  }
+}

@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Focus
-This repository is primarily focused on building a chain-of-thought (CoT) loop detector. The current detector predicts whether a model will enter a repetitive reasoning loop using only prefill activations.
+This repository builds a chain-of-thought (CoT) loop detector from configurable activation views. The current focus is a mixed-view workflow: completion features remain the strongest overall arm, while the 2026-03-13 prefill follow-up is stress-testing metadata-aware prefill residual signal and anchor-plus-boundary augmentations on the active PR branch.
 
 ## Project Structure & Module Organization
 - `src/loop_probe/`: Core library for prompt loading, prefill extraction, rollout generation, loop labeling, probe architectures, and training utilities.

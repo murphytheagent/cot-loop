@@ -24,6 +24,7 @@ class ProbeConfig:
     probe_type: str = "linear"
     hidden_dim: int = 1024
     dropout: float = 0.0
+    depth: int = 1
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -58,6 +59,7 @@ PROBE_DEFAULTS: dict[str, ProbeConfig] = {
         probe_type="mlp",
         hidden_dim=128,
         dropout=0.1,
+        depth=1,
     ),
 }
 
@@ -120,13 +122,24 @@ def get_rollout_config(
 
 def get_probe_config(
     preset: str | None,
+    *,
+    hidden_dim: int | None = None,
+    dropout: float | None = None,
+    depth: int | None = None,
 ) -> ProbeConfig:
     key = preset or "linear"
     if key not in PROBE_DEFAULTS:
         raise ValueError(
             f"Unknown probe preset '{key}'. Valid presets: {probe_preset_choices()}"
         )
-    return PROBE_DEFAULTS[key]
+    cfg = PROBE_DEFAULTS[key]
+    if hidden_dim is not None:
+        cfg = replace(cfg, hidden_dim=hidden_dim)
+    if dropout is not None:
+        cfg = replace(cfg, dropout=dropout)
+    if depth is not None:
+        cfg = replace(cfg, depth=depth)
+    return cfg
 
 
 def build_probe_model(input_dim: int, probe_cfg: ProbeConfig) -> nn.Module:
@@ -140,6 +153,8 @@ def build_probe_model(input_dim: int, probe_cfg: ProbeConfig) -> nn.Module:
     if probe_cfg.probe_type == "mlp":
         if probe_cfg.hidden_dim < 1:
             raise ValueError("MLP hidden_dim must be >= 1")
+        if probe_cfg.depth < 1:
+            raise ValueError("MLP depth must be >= 1")
         if not 0.0 <= probe_cfg.dropout < 1.0:
             raise ValueError("MLP dropout must be in [0, 1)")
 
@@ -149,6 +164,7 @@ def build_probe_model(input_dim: int, probe_cfg: ProbeConfig) -> nn.Module:
             input_dim=input_dim,
             hidden_dim=probe_cfg.hidden_dim,
             dropout=probe_cfg.dropout,
+            depth=probe_cfg.depth,
         )
 
     raise ValueError(f"Unsupported probe_type '{probe_cfg.probe_type}'")

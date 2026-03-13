@@ -16,7 +16,12 @@ SRC = os.path.join(ROOT, "src")
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
-from loop_probe.dataloader import make_dataloader, read_manifest
+from loop_probe.dataloader import (
+    make_dataloader,
+    read_manifest,
+    resolve_input_dim,
+    resolve_split_info,
+)
 from loop_probe.configs import (
     build_probe_model,
     get_probe_config,
@@ -51,6 +56,32 @@ def _parse_args() -> argparse.Namespace:
         "--probe-preset",
         choices=probe_preset_choices(),
         default="linear",
+    )
+    parser.add_argument(
+        "--mlp-hidden-dim",
+        type=int,
+        default=None,
+        help="Optional hidden width override when --probe-preset=mlp.",
+    )
+    parser.add_argument(
+        "--mlp-depth",
+        type=int,
+        default=None,
+        help="Optional number of hidden layers when --probe-preset=mlp.",
+    )
+    parser.add_argument(
+        "--mlp-dropout",
+        type=float,
+        default=None,
+        help="Optional dropout override when --probe-preset=mlp.",
+    )
+    parser.add_argument(
+        "--feature-key",
+        default=None,
+        help=(
+            "Optional feature view key from a multi-view dataset manifest. "
+            "If omitted, uses manifest default or legacy single-view fields."
+        ),
     )
 
     parser.add_argument("--wandb-project", required=True)
@@ -87,6 +118,7 @@ def _checkpoint_payload(
     step: int,
     metrics: dict[str, float],
     probe_config: dict[str, object] | None = None,
+    feature_key: str | None = None,
 ) -> dict[str, object]:
     payload = {
         "epoch": epoch,
@@ -96,6 +128,8 @@ def _checkpoint_payload(
     }
     if probe_config is not None:
         payload["probe_config"] = probe_config
+    if feature_key:
+        payload["feature_key"] = feature_key
     return payload
 
 
@@ -132,6 +166,24 @@ def main() -> None:
         raise SystemExit("--warmup-ratio must be in [0, 1).")
     if not 0.0 <= args.min_lr_ratio <= 1.0:
         raise SystemExit("--min-lr-ratio must be in [0, 1].")
+    if args.mlp_hidden_dim is not None and args.mlp_hidden_dim < 1:
+        raise SystemExit("--mlp-hidden-dim must be >= 1.")
+    if args.mlp_depth is not None and args.mlp_depth < 1:
+        raise SystemExit("--mlp-depth must be >= 1.")
+    if args.mlp_dropout is not None and not 0.0 <= args.mlp_dropout < 1.0:
+        raise SystemExit("--mlp-dropout must be in [0, 1).")
+    if (
+        args.probe_preset != "mlp"
+        and (
+            args.mlp_hidden_dim is not None
+            or args.mlp_depth is not None
+            or args.mlp_dropout is not None
+        )
+    ):
+        raise SystemExit(
+            "--mlp-hidden-dim/--mlp-depth/--mlp-dropout can only be used with "
+            "--probe-preset=mlp."
+        )
 
     set_seed(args.seed)
     device = choose_device(args.device)
@@ -151,9 +203,19 @@ def main() -> None:
     import wandb
 
     manifest = read_manifest(args.data_dir)
-    input_dim = int(manifest["input_dim"])
+    train_info, resolved_feature_key = resolve_split_info(
+        manifest,
+        split="train",
+        feature_key=args.feature_key,
+    )
+    input_dim = resolve_input_dim(manifest, resolved_feature_key)
     try:
-        probe_cfg = get_probe_config(args.probe_preset)
+        probe_cfg = get_probe_config(
+            args.probe_preset,
+            hidden_dim=args.mlp_hidden_dim,
+            dropout=args.mlp_dropout,
+            depth=args.mlp_depth,
+        )
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
 
@@ -164,6 +226,7 @@ def main() -> None:
         shuffle=True,
         num_workers=args.num_workers,
         pin_memory=(device.type == "cuda"),
+        feature_key=resolved_feature_key,
     )
     test_loader = make_dataloader(
         args.data_dir,
@@ -172,13 +235,13 @@ def main() -> None:
         shuffle=False,
         num_workers=args.num_workers,
         pin_memory=(device.type == "cuda"),
+        feature_key=resolved_feature_key,
     )
     steps_per_epoch = len(train_loader)
     if steps_per_epoch < 1:
         raise SystemExit("Training split is empty.")
     total_steps = args.epochs * steps_per_epoch
 
-    train_info = manifest.get("train", {})
     num_pos = int(train_info.get("num_positive", 0))
     num_neg = int(train_info.get("num_negative", 0))
     if num_pos > 0 and num_neg > 0:
@@ -205,6 +268,7 @@ def main() -> None:
         name=args.wandb_run_name,
         config={
             "data_dir": args.data_dir,
+            "feature_key": resolved_feature_key,
             "input_dim": input_dim,
             "epochs": args.epochs,
             "batch_size": args.batch_size,
@@ -302,7 +366,12 @@ def main() -> None:
                 "train/loss_epoch": train_loss_epoch,
                 "train/accuracy_epoch": train_metrics_epoch["accuracy"],
                 "train/macro_f1_epoch": train_metrics_epoch["macro_f1"],
+                "train/positive_precision_epoch": train_metrics_epoch["positive_precision"],
+                "train/positive_recall_epoch": train_metrics_epoch["positive_recall"],
+                "train/positive_f1_epoch": train_metrics_epoch["positive_f1"],
+                "train/prevalence_epoch": train_metrics_epoch["prevalence"],
                 "train/roc_auc_epoch": train_metrics_epoch["roc_auc"],
+                "train/pr_auc_epoch": train_metrics_epoch["pr_auc"],
                 "train/lr": lr_now,
                 "epoch": epoch,
                 "step": global_step,
@@ -321,7 +390,12 @@ def main() -> None:
                 "train_loss": train_loss_epoch,
                 "train_accuracy": train_metrics_epoch["accuracy"],
                 "train_macro_f1": train_metrics_epoch["macro_f1"],
+                "train_positive_precision": train_metrics_epoch["positive_precision"],
+                "train_positive_recall": train_metrics_epoch["positive_recall"],
+                "train_positive_f1": train_metrics_epoch["positive_f1"],
+                "train_prevalence": train_metrics_epoch["prevalence"],
                 "train_roc_auc": train_metrics_epoch["roc_auc"],
+                "train_pr_auc": train_metrics_epoch["pr_auc"],
                 "seed": args.seed,
                 "lr": lr_now,
                 **eval_metrics,
@@ -333,7 +407,12 @@ def main() -> None:
                 {
                     "eval/accuracy": eval_metrics["accuracy"],
                     "eval/macro_f1": eval_metrics["macro_f1"],
+                    "eval/positive_precision": eval_metrics["positive_precision"],
+                    "eval/positive_recall": eval_metrics["positive_recall"],
+                    "eval/positive_f1": eval_metrics["positive_f1"],
+                    "eval/prevalence": eval_metrics["prevalence"],
                     "eval/roc_auc": eval_metrics["roc_auc"],
+                    "eval/pr_auc": eval_metrics["pr_auc"],
                     "epoch": epoch,
                     "step": global_step,
                 },
@@ -357,6 +436,7 @@ def main() -> None:
                         global_step,
                         eval_metrics,
                         probe_config=probe_cfg.to_dict(),
+                        feature_key=resolved_feature_key,
                     ),
                     best_ckpt,
                 )
@@ -367,9 +447,13 @@ def main() -> None:
                         f"epoch={epoch}",
                         f"train_loss={train_loss_epoch:.6f}",
                         f"train_acc={train_metrics_epoch['accuracy']:.4f}",
+                        f"train_prevalence={train_metrics_epoch['prevalence']:.4f}",
                         f"eval_acc={eval_metrics['accuracy']:.4f}",
+                        f"eval_pos_p={eval_metrics['positive_precision']:.4f}",
+                        f"eval_pos_r={eval_metrics['positive_recall']:.4f}",
                         f"eval_f1={eval_metrics['macro_f1']:.4f}",
                         f"eval_auc={eval_metrics['roc_auc']:.4f}",
+                        f"eval_pr_auc={eval_metrics['pr_auc']:.4f}",
                     ]
                 ),
                 flush=True,
@@ -382,8 +466,11 @@ def main() -> None:
                         f"epoch={epoch}",
                         f"train_loss={train_loss_epoch:.6f}",
                         f"train_acc={train_metrics_epoch['accuracy']:.4f}",
+                        f"train_pos_p={train_metrics_epoch['positive_precision']:.4f}",
+                        f"train_pos_r={train_metrics_epoch['positive_recall']:.4f}",
                         f"train_f1={train_metrics_epoch['macro_f1']:.4f}",
                         f"train_auc={train_metrics_epoch['roc_auc']:.4f}",
+                        f"train_pr_auc={train_metrics_epoch['pr_auc']:.4f}",
                     ]
                 ),
                 flush=True,
@@ -398,9 +485,15 @@ def main() -> None:
                     "train_loss": train_loss_epoch,
                     "train_accuracy": train_metrics_epoch["accuracy"],
                     "train_macro_f1": train_metrics_epoch["macro_f1"],
+                    "train_positive_precision": train_metrics_epoch["positive_precision"],
+                    "train_positive_recall": train_metrics_epoch["positive_recall"],
+                    "train_positive_f1": train_metrics_epoch["positive_f1"],
+                    "train_prevalence": train_metrics_epoch["prevalence"],
                     "train_roc_auc": train_metrics_epoch["roc_auc"],
+                    "train_pr_auc": train_metrics_epoch["pr_auc"],
                 },
                 probe_config=probe_cfg.to_dict(),
+                feature_key=resolved_feature_key,
             ),
             last_ckpt,
         )

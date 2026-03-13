@@ -1,0 +1,71 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{hyperref}
+
+\title{Prefill Round 5: Adding Boundary Context on Top of the Metadata-Aware Last-Token Anchor}
+\author{}
+\date{2026-03-13 13:05 UTC}
+
+\begin{document}
+\maketitle
+
+\section*{Question}
+Round 4 showed that simple boundary-window summaries do \emph{not} beat the Round 3 metadata-aware last-token anchor when they \emph{replace} it. The next compact question was therefore narrower: do these summaries help only when they are \emph{added on top of} the anchor instead of replacing it?
+
+\section*{Setup}
+I reused the Round 4 fixed-split multi-view prefill tensors and changed only the training input.
+
+\begin{itemize}
+  \item \textbf{Train/eval data}: unchanged from Rounds 3--4 (source-control train, natural test, matched test).
+  \item \textbf{Training objective}: unchanged additive residual-over-metadata MLP.
+  \item \textbf{Metadata branch}: unchanged validated legacy control.
+  \item \textbf{New step}: concatenate the Round 4 anchor feature with one extra boundary-aware view from the same sample IDs, then train the same residual probe.
+\end{itemize}
+
+Augmented feature arms:
+\begin{itemize}
+  \item \textbf{Anchor + last16}: all-layer last-token concat plus the last-16-token boundary summary.
+  \item \textbf{Anchor + $\Delta8$}: all-layer last-token concat plus the local boundary-shift summary.
+  \item \textbf{Anchor + (last16 + $\Delta8$)}: anchor plus the small Round 4 boundary hybrid.
+\end{itemize}
+
+\section*{Main Results}
+\begin{center}
+\small
+\resizebox{\textwidth}{!}{
+\begin{tabular}{@{}p{3.5cm}rrrrrr@{}}
+\toprule
+View & Natural PR & Natural ROC & Matched PR & Matched ROC & Matched bin PR & $\Delta$ Matched PR vs Round 4 anchor \\
+\midrule
+Anchor + last16 & 0.4313 $\pm$ 0.0030 & 0.7527 & 0.6501 $\pm$ 0.0020 & 0.6860 $\pm$ 0.0019 & 0.6533 & +0.0085 \\
+Anchor + $\Delta8$ & 0.4236 $\pm$ 0.0040 & 0.7486 & 0.6438 $\pm$ 0.0057 & 0.6796 $\pm$ 0.0058 & 0.6471 & +0.0022 \\
+Anchor + (last16 + $\Delta8$) & 0.4246 $\pm$ 0.0061 & 0.7520 & 0.6375 $\pm$ 0.0086 & 0.6768 $\pm$ 0.0058 & 0.6342 & -0.0041 \\
+\bottomrule
+\end{tabular}
+}
+\end{center}
+
+For reference, the Round 4 anchor alone was:
+\[
+\text{natural PR-AUC } 0.4182, \quad
+\text{natural ROC-AUC } 0.7503, \quad
+\text{matched PR-AUC } 0.6416, \quad
+\text{matched ROC-AUC } 0.6805.
+\]
+
+\section*{Interpretation}
+\begin{itemize}
+  \item \textbf{Adding context helps more than replacing the anchor.} The best augmented arm, \textbf{anchor + last16}, improves on the Round 4 anchor by about \textbf{+0.0130 natural PR-AUC}, \textbf{+0.0024 natural ROC-AUC}, \textbf{+0.0085 matched PR-AUC}, and \textbf{+0.0055 matched ROC-AUC}.
+  \item \textbf{The useful extra context is coarse boundary state, not local shift by itself.} \textbf{Anchor + $\Delta8$} is only marginally above the anchor on matched PR-AUC, while \textbf{anchor + last16} is the clear winner of the three follow-up arms.
+  \item \textbf{More concatenation is not automatically better.} The largest combo, \textbf{anchor + (last16 + $\Delta8$)}, gives back the gain and falls below the Round 4 anchor on matched metrics.
+  \item \textbf{This is a modest but real change in the picture.} Round 4 said the cheap summaries were not good \emph{replacements}. Round 5 says at least one of them (\textbf{last16}) is mildly useful as an \emph{augmentation} to the last-token anchor.
+\end{itemize}
+
+\section*{Bottom Line}
+The next-step diagnosis sharpens again. The current metadata-aware prefill detector still wants the \textbf{all-layer last-token anchor} as its core view, but it is \emph{not} completely sufficient by itself: adding a coarse last-16 boundary summary yields the best result seen in this representation family so far. The gain is modest rather than dramatic, so the next compact round should focus on whether this signal can be made cleaner or more stable, for example by testing a low-rank / bottlenecked anchor-plus-last16 fusion or a small within-bin ranking auxiliary loss on that combined view.
+
+\end{document}

@@ -1,6 +1,6 @@
 import multiprocessing as mp
 import os
-import queue as queue_module
+from multiprocessing.connection import wait
 
 from transformers import AutoTokenizer, GenerationConfig
 
@@ -111,6 +111,19 @@ def _generate_rollout_token_ids_single_process(
         "max_model_len": cfg.max_model_len,
         "trust_remote_code": cfg.trust_remote_code,
     }
+    gpu_mem_util = os.environ.get("VLLM_GPU_MEMORY_UTILIZATION", "").strip()
+    if gpu_mem_util:
+        try:
+            gpu_mem_value = float(gpu_mem_util)
+        except Exception as exc:
+            raise SystemExit(
+                "VLLM_GPU_MEMORY_UTILIZATION must be a float in (0, 1]."
+            ) from exc
+        if not (0.0 < gpu_mem_value <= 1.0):
+            raise SystemExit(
+                "VLLM_GPU_MEMORY_UTILIZATION must be in (0, 1]."
+            )
+        llm_kwargs["gpu_memory_utilization"] = gpu_mem_value
     if cfg.max_num_seqs is not None:
         llm_kwargs["max_num_seqs"] = cfg.max_num_seqs
     if cfg.max_num_batched_tokens is not None:
@@ -161,7 +174,7 @@ def _dp_rollout_worker(
     shard_items: list[tuple[int, str]],
     cfg: RolloutConfig,
     seed: int,
-    out_queue: "mp.queues.SimpleQueue",
+    out_conn,
 ) -> None:
     _suppress_sem_unlink_errors()
     os.environ["CUDA_VISIBLE_DEVICES"] = device
@@ -173,7 +186,8 @@ def _dp_rollout_worker(
         log_prefix=f"[rollout-dp-rank {rank}]",
     )
     indexed = [(idx, toks) for (idx, _), toks in zip(shard_items, token_ids)]
-    out_queue.put((rank, indexed))
+    out_conn.send((rank, indexed))
+    out_conn.close()
 
 
 def generate_rollout_token_ids(
@@ -205,22 +219,25 @@ def generate_rollout_token_ids(
         )
 
     ctx = mp.get_context("spawn")
-    out_queue: "mp.queues.Queue" = ctx.Queue()
+    conn_to_rank: dict[object, int] = {}
     processes = []
     for rank in range(worker_count):
         shard_items = [(idx, prompts[idx]) for idx in range(rank, len(prompts), worker_count)]
+        parent_conn, child_conn = ctx.Pipe(duplex=False)
+        conn_to_rank[parent_conn] = rank
         p = ctx.Process(
             target=_dp_rollout_worker,
-            args=(rank, devices[rank], shard_items, cfg, seed, out_queue),
+            args=(rank, devices[rank], shard_items, cfg, seed, child_conn),
         )
         p.start()
+        child_conn.close()
         processes.append(p)
 
     by_rank: dict[int, list[tuple[int, list[int]]]] = {}
+    pending = set(conn_to_rank.keys())
     while len(by_rank) < worker_count:
-        try:
-            rank, indexed = out_queue.get(timeout=30)
-        except queue_module.Empty:
+        ready = wait(list(pending), timeout=30)
+        if not ready:
             dead_missing = []
             for rank, proc in enumerate(processes):
                 if rank in by_rank:
@@ -232,7 +249,21 @@ def generate_rollout_token_ids(
                     f"Rollout worker(s) exited before reporting outputs: {dead_missing}"
                 )
             continue
-        by_rank[int(rank)] = indexed
+        for conn in ready:
+            rank = conn_to_rank[conn]
+            try:
+                msg_rank, indexed = conn.recv()
+            except EOFError as exc:
+                raise SystemExit(
+                    f"Rollout worker {rank} exited before reporting outputs."
+                ) from exc
+            if int(msg_rank) != int(rank):
+                raise SystemExit(
+                    f"Rollout worker rank mismatch: expected {rank}, got {msg_rank}."
+                )
+            by_rank[int(rank)] = indexed
+            conn.close()
+            pending.discard(conn)
 
     failures = []
     for rank, proc in enumerate(processes):

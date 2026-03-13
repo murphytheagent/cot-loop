@@ -1,0 +1,78 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{hyperref}
+\title{cot-loop PR\#2 Follow-up Audit \\ Last-token Final vs Mean-pool Final}
+\author{}
+\date{2026-03-03 06:52 UTC}
+
+\begin{document}
+\maketitle
+
+\section*{Question Scope}
+Follow-up asks addressed in this audit:
+\begin{enumerate}
+  \item Is ROC-AUC the right metric, and what do F1/accuracy say under class imbalance?
+  \item Why does \texttt{last\_token\_final} show ID minus OOD ROC-AUC of \texttt{-0.1151}?
+  \item Restrict conclusions to \texttt{last\_token\_final} and \texttt{mean\_pool\_final}.
+  \item Can one rollout-built dataset be reused for both feature views?
+\end{enumerate}
+
+\section*{Observed Metrics (PR\#2 runs)}
+\begin{center}
+\begin{tabular}{@{}llrrrrr@{}}
+\toprule
+Feature & Split & Positives/60 & ROC-AUC & Accuracy & Macro-F1 & Maj. Acc. \\
+\midrule
+Last-token final & OOD & 19 & 0.6521 & 0.4833 & 0.4820 & 0.6833 \\
+Last-token final & ID  & 6  & 0.5370 & 0.8000 & 0.5148 & 0.9000 \\
+Mean-pool final  & OOD & 18 & 0.4603 & 0.5667 & 0.4841 & 0.7000 \\
+Mean-pool final  & ID  & 5  & 0.7818 & 0.9167 & 0.4783 & 0.9167 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Majority-class accuracy is from always predicting non-loop (negative), computed from prevalence.
+
+\section*{Interpretation}
+\begin{itemize}
+  \item \textbf{ROC-AUC should be kept, but not used alone.} It measures ranking quality and is threshold-free.
+  \item \textbf{Accuracy is misleading on ID} because positive prevalence is only 5--6 out of 60. High ID accuracy can come from majority-negative predictions.
+  \item \textbf{Macro-F1 gives thresholded class-balance signal} and remains around 0.48--0.51 across the four runs, indicating weak minority-class performance.
+\end{itemize}
+
+Recommended reporting bundle for this setup:
+\begin{itemize}
+  \item ROC-AUC
+  \item Macro-F1
+  \item Positive-class precision and recall
+  \item Class prevalence
+  \item PR-AUC (Average Precision) for imbalance-sensitive ranking
+\end{itemize}
+
+\section*{Why \texttt{last\_token\_final} has ID-\!OOD = -0.1151}
+The measured values are OOD 0.6521 vs ID 0.5370, with only 6 ID positives. With this small positive count, AUC uncertainty is large and overlapping with OOD-scale uncertainty. So this negative gap is plausibly sampling variance, not strong evidence of an actual ID regression.
+
+A second confound in PR\#2 is that each feature run rebuilt labels independently, so positives drifted across runs (OOD 18--21, ID 3--6), making feature comparisons directional rather than strictly matched.
+
+\section*{Efficiency: one rollout build for both feature views}
+Yes. The current dataset builder couples rollout-label generation and feature extraction, so changing feature view can trigger relabeling. A better design is:
+\begin{enumerate}
+  \item Build and cache one shared \textbf{split+label artifact} keyed by prompt source, split seed, rollout config, and loop definition.
+  \item Build separate \textbf{feature-view shards} (last-token final, mean-pool final) against the same sample IDs and label order.
+  \item Train probes by selecting feature key, without rerunning rollouts.
+\end{enumerate}
+
+Benefits:
+\begin{itemize}
+  \item One rollout job supports both feature views.
+  \item No per-feature label drift.
+  \item Cleaner apples-to-apples ID/OOD comparison.
+\end{itemize}
+
+\section*{Actionable Next Step}
+For the next PR update, keep only \texttt{last\_token\_final} and \texttt{mean\_pool\_final}, add PR-AUC plus positive precision/recall reporting, and implement the shared-label-cache split so both views reuse one rollout build.
+
+\end{document}

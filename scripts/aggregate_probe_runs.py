@@ -8,7 +8,21 @@ import csv
 import json
 import math
 import os
+import re
 import statistics
+
+
+SUMMARY_METRICS = (
+    "accuracy",
+    "macro_f1",
+    "roc_auc",
+    "pr_auc",
+    "positive_precision",
+    "positive_recall",
+    "positive_f1",
+    "prevalence",
+)
+DEFAULT_SELECTION = ("roc_auc", "macro_f1")
 
 
 def _parse_args() -> argparse.Namespace:
@@ -16,13 +30,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--run-dirs", nargs="+", required=True)
     parser.add_argument(
         "--selection-metric",
-        choices=("roc_auc", "macro_f1", "accuracy"),
+        choices=("roc_auc", "pr_auc", "macro_f1", "positive_f1", "accuracy"),
         default="roc_auc",
         help="Metric used to select best checkpoint row per run.",
     )
     parser.add_argument(
         "--tie-breaker",
-        choices=("roc_auc", "macro_f1", "accuracy"),
+        choices=("roc_auc", "pr_auc", "macro_f1", "positive_f1", "accuracy"),
         default="macro_f1",
         help="Secondary metric used when selection metric ties.",
     )
@@ -54,6 +68,22 @@ def _as_float_or_nan(value: object) -> float:
         return float(value)
     except (TypeError, ValueError):
         return float("nan")
+
+
+def _infer_selection_pair(row: dict[str, object]) -> tuple[str, str] | None:
+    selection_metric = row.get("selection_metric")
+    tie_breaker = row.get("tie_breaker")
+    if isinstance(selection_metric, str) and isinstance(tie_breaker, str):
+        return selection_metric, tie_breaker
+
+    selection_rule = row.get("selection_rule")
+    if not isinstance(selection_rule, str):
+        return None
+
+    parts = re.findall(r"max\(([^)]+)\)", selection_rule)
+    if len(parts) >= 2:
+        return parts[0], parts[1]
+    return None
 
 
 def _best_row_from_jsonl(
@@ -103,28 +133,7 @@ def _infer_seed(run_dir: str, row: dict[str, object]) -> int | None:
     return None
 
 
-def _load_best_row(
-    run_dir: str,
-    *,
-    selection_metric: str,
-    tie_breaker: str,
-) -> dict[str, object]:
-    best_metrics_path = os.path.join(run_dir, "best_metrics.json")
-    if os.path.exists(best_metrics_path):
-        with open(best_metrics_path, "r", encoding="utf-8") as f:
-            row = json.load(f)
-    else:
-        metrics_jsonl = os.path.join(run_dir, "metrics.jsonl")
-        if not os.path.exists(metrics_jsonl):
-            raise SystemExit(
-                f"Missing both best_metrics.json and metrics.jsonl under {run_dir}"
-            )
-        row = _best_row_from_jsonl(
-            metrics_jsonl,
-            selection_metric=selection_metric,
-            tie_breaker=tie_breaker,
-        )
-
+def _format_row(run_dir: str, row: dict[str, object]) -> dict[str, object]:
     return {
         "run_dir": run_dir,
         "seed": _infer_seed(run_dir, row),
@@ -133,7 +142,44 @@ def _load_best_row(
         "accuracy": _as_float_or_nan(row.get("accuracy")),
         "macro_f1": _as_float_or_nan(row.get("macro_f1")),
         "roc_auc": _as_float_or_nan(row.get("roc_auc")),
+        "pr_auc": _as_float_or_nan(row.get("pr_auc")),
+        "positive_precision": _as_float_or_nan(row.get("positive_precision")),
+        "positive_recall": _as_float_or_nan(row.get("positive_recall")),
+        "positive_f1": _as_float_or_nan(row.get("positive_f1")),
+        "prevalence": _as_float_or_nan(row.get("prevalence")),
     }
+
+
+def _load_best_row(
+    run_dir: str,
+    *,
+    selection_metric: str,
+    tie_breaker: str,
+) -> dict[str, object]:
+    best_metrics_path = os.path.join(run_dir, "best_metrics.json")
+    metrics_jsonl = os.path.join(run_dir, "metrics.jsonl")
+    best_row: dict[str, object] | None = None
+    best_selection: tuple[str, str] | None = None
+
+    if os.path.exists(best_metrics_path):
+        with open(best_metrics_path, "r", encoding="utf-8") as f:
+            best_row = json.load(f)
+        best_selection = _infer_selection_pair(best_row)
+
+    if os.path.exists(metrics_jsonl):
+        if best_row is None or best_selection != (selection_metric, tie_breaker):
+            row = _best_row_from_jsonl(
+                metrics_jsonl,
+                selection_metric=selection_metric,
+                tie_breaker=tie_breaker,
+            )
+            return _format_row(run_dir, row)
+        return _format_row(run_dir, best_row)
+
+    if best_row is not None:
+        return _format_row(run_dir, best_row)
+
+    raise SystemExit(f"Missing both best_metrics.json and metrics.jsonl under {run_dir}")
 
 
 def _aggregate(rows: list[dict[str, object]], metric: str) -> dict[str, object]:
@@ -166,7 +212,7 @@ def _write_summary_csv(path: str, summary: dict[str, dict[str, object]]) -> None
     with open(path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["metric", "mean", "std", "n"])
         writer.writeheader()
-        for metric in ("accuracy", "macro_f1", "roc_auc"):
+        for metric in SUMMARY_METRICS:
             stats = summary[metric]
             writer.writerow(
                 {
@@ -198,7 +244,7 @@ def main() -> None:
 
     summary = {
         metric: _aggregate(rows, metric)
-        for metric in ("accuracy", "macro_f1", "roc_auc")
+        for metric in SUMMARY_METRICS
     }
     payload = {
         "selection_metric": args.selection_metric,
@@ -224,7 +270,7 @@ def main() -> None:
         f"tie_breaker={args.tie_breaker}",
         flush=True,
     )
-    for metric in ("accuracy", "macro_f1", "roc_auc"):
+    for metric in SUMMARY_METRICS:
         stats = summary[metric]
         mean_val = float(stats["mean"])
         std_val = float(stats["std"])

@@ -3,6 +3,9 @@
 
 # documents
 *.pdf
+*.aux
+*.log
+*.out
 
 # environment
 .venv/
