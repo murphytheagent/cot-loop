@@ -1,0 +1,145 @@
+{
+  "arms": [
+    {
+      "arm_key": "anchor",
+      "arm_label": "anchor",
+      "selection_split": "val",
+      "selection_metric": "pr_auc",
+      "tie_breaker": "macro_f1",
+      "natural_pr_auc_mean": 0.4137889604077927,
+      "natural_pr_auc_std": 0.0044837860337536535,
+      "natural_roc_auc_mean": 0.7407262660804429,
+      "natural_bin_pr_auc_mean": 0.41483897756975896,
+      "matched_pr_auc_mean": 0.6497834799789165,
+      "matched_pr_auc_std": 0.0052103268883484126,
+      "matched_roc_auc_mean": 0.6836042848141147,
+      "matched_bin_pr_auc_mean": 0.6641199614393695,
+      "delta_natural_pr_vs_anchor": 0.0,
+      "delta_matched_pr_vs_anchor": 0.0,
+      "delta_matched_bin_pr_vs_anchor": 0.0,
+      "delta_matched_roc_vs_anchor": 0.0,
+      "metadata_natural_pr_auc": 0.3337534060053631,
+      "metadata_matched_pr_auc": 0.5492952874085992
+    },
+    {
+      "arm_key": "anchor_plus_last16",
+      "arm_label": "anchor_plus_last16",
+      "selection_split": "val",
+      "selection_metric": "pr_auc",
+      "tie_breaker": "macro_f1",
+      "natural_pr_auc_mean": 0.41763208142700137,
+      "natural_pr_auc_std": 0.001378949043966639,
+      "natural_roc_auc_mean": 0.7512457254518807,
+      "natural_bin_pr_auc_mean": 0.3963058405634515,
+      "matched_pr_auc_mean": 0.6417621301231391,
+      "matched_pr_auc_std": 0.0025462737263398827,
+      "matched_roc_auc_mean": 0.6848645242596093,
+      "matched_bin_pr_auc_mean": 0.6348466921799935,
+      "delta_natural_pr_vs_anchor": 0.0038431210192086396,
+      "delta_matched_pr_vs_anchor": -0.008021349855777404,
+      "delta_matched_bin_pr_vs_anchor": -0.02927326925937601,
+      "delta_matched_roc_vs_anchor": 0.001260239445494582,
+      "metadata_natural_pr_auc": 0.3337534060053631,
+      "metadata_matched_pr_auc": 0.5492952874085992
+    },
+    {
+      "arm_key": "anchor_plus_last16_lowrank256",
+      "arm_label": "anchor_plus_last16_lowrank256",
+      "selection_split": "val",
+      "selection_metric": "pr_auc",
+      "tie_breaker": "macro_f1",
+      "natural_pr_auc_mean": 0.41512971538642157,
+      "natural_pr_auc_std": 0.00536791848398708,
+      "natural_roc_auc_mean": 0.7486989089724801,
+      "natural_bin_pr_auc_mean": 0.4081274116187912,
+      "matched_pr_auc_mean": 0.6452989688769801,
+      "matched_pr_auc_std": 0.006099576813089764,
+      "matched_roc_auc_mean": 0.6867044738500315,
+      "matched_bin_pr_auc_mean": 0.6521348380301397,
+      "delta_natural_pr_vs_anchor": 0.0013407549786288442,
+      "delta_matched_pr_vs_anchor": -0.004484511101936373,
+      "delta_matched_bin_pr_vs_anchor": -0.011985123409229748,
+      "delta_matched_roc_vs_anchor": 0.0031001890359168005,
+      "metadata_natural_pr_auc": 0.3337534060053631,
+      "metadata_matched_pr_auc": 0.5492952874085992
+    }
+  ],
+  "metadata_legacy": {
+    "matched": {
+      "accuracy": 0.5521739130434783,
+      "macro_f1": 0.5497139381498166,
+      "positive_f1": 0.5164319248826291,
+      "positive_precision": 0.5612244897959183,
+      "positive_recall": 0.4782608695652174,
+      "pr_auc": 0.5492952874085992,
+      "prevalence": 0.5,
+      "roc_auc": 0.5421928166351607
+    },
+    "natural": {
+      "accuracy": 0.7214285714285714,
+      "macro_f1": 0.6154320226796499,
+      "positive_f1": 0.41353383458646614,
+      "positive_precision": 0.36423841059602646,
+      "positive_recall": 0.4782608695652174,
+      "pr_auc": 0.3337534060053631,
+      "prevalence": 0.20535714285714285,
+      "roc_auc": 0.6553590620420127
+    },
+    "params": {
+      "coef": [
+        [
+          -0.040089146132914866,
+          0.6951665620676378,
+          -0.24269055047814123,
+          0.2343790231646807,
+          -0.3149683647345296
+        ]
+      ],
+      "feature_set": "legacy",
+      "intercept": [
+        0.06129668219777962
+      ],
+      "scaler_mean": [
+        278.42929292929296,
+        95.68911335578002,
+        4.389365685971368,
+        2.6262626262626263,
+        12.530303030303031,
+        8.313131313131313
+      ],
+      "scaler_scale": [
+        194.64964438125554,
+        69.22149167375213,
+        0.5986880443329294,
+        5.194375082402412,
+        15.717587988826653,
+        8.314162215004878
+      ],
+      "source_reference": "SuperSecureHuman/competition_math_hf_dataset",
+      "source_vocab": [
+        "SuperSecureHuman/competition_math_hf_dataset",
+        "open-r1/OpenR1-Math-220k"
+      ]
+    },
+    "train": {
+      "accuracy": 0.622895622895623,
+      "macro_f1": 0.618559328080565,
+      "positive_f1": 0.5778894472361809,
+      "positive_precision": 0.6562054208273894,
+      "positive_recall": 0.5162738496071829,
+      "pr_auc": 0.6585761564936989,
+      "prevalence": 0.5,
+      "roc_auc": 0.663328634896162
+    },
+    "val": {
+      "accuracy": 0.5796178343949044,
+      "macro_f1": 0.5762483130904184,
+      "positive_f1": 0.5384615384615384,
+      "positive_precision": 0.5968992248062015,
+      "positive_recall": 0.49044585987261147,
+      "pr_auc": 0.607087081736029,
+      "prevalence": 0.5,
+      "roc_auc": 0.6087873747413688
+    }
+  }
+}

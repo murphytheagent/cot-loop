@@ -17,6 +17,7 @@ import torch
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.preprocessing import StandardScaler
+from torch import nn
 from torch.utils.data import DataLoader, Dataset
 from transformers import AutoTokenizer
 
@@ -184,6 +185,49 @@ class MetadataModel:
         return np.concatenate(interactions, axis=1)
 
 
+class LowRankMLPProbe(nn.Module):
+    """Factor the first wide map through a fixed low-rank bottleneck."""
+
+    def __init__(
+        self,
+        *,
+        input_dim: int,
+        low_rank_dim: int,
+        hidden_dim: int,
+        dropout: float = 0.0,
+        depth: int = 1,
+    ) -> None:
+        super().__init__()
+        if low_rank_dim < 1:
+            raise ValueError("low_rank_dim must be >= 1.")
+        if hidden_dim < 1:
+            raise ValueError("hidden_dim must be >= 1.")
+        if depth < 1:
+            raise ValueError("depth must be >= 1.")
+        if not 0.0 <= dropout < 1.0:
+            raise ValueError("dropout must be in [0, 1).")
+
+        layers: list[nn.Module] = [
+            nn.Linear(input_dim, low_rank_dim, bias=False),
+            nn.Linear(low_rank_dim, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+        ]
+        for _ in range(depth - 1):
+            layers.extend(
+                [
+                    nn.Linear(hidden_dim, hidden_dim),
+                    nn.GELU(),
+                    nn.Dropout(dropout),
+                ]
+            )
+        layers.append(nn.Linear(hidden_dim, 1))
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x).squeeze(-1)
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--train-data-dir", required=True)
@@ -226,7 +270,7 @@ def _parse_args() -> argparse.Namespace:
 
     parser.add_argument(
         "--selection-split",
-        choices=("natural", "matched"),
+        choices=("val", "natural", "matched"),
         default="natural",
     )
     parser.add_argument(
@@ -239,6 +283,9 @@ def _parse_args() -> argparse.Namespace:
         choices=("accuracy", "macro_f1", "positive_f1", "roc_auc", "pr_auc"),
         default="macro_f1",
     )
+    parser.add_argument("--low-rank-dim", type=int, default=0)
+    parser.add_argument("--holdout-ratio", type=float, default=0.0)
+    parser.add_argument("--holdout-seed", type=int, default=0)
     return parser.parse_args()
 
 
@@ -255,6 +302,12 @@ def _validate_args(args: argparse.Namespace) -> None:
         raise SystemExit("--min-lr-ratio must be in [0, 1].")
     if args.num_length_bins < 1:
         raise SystemExit("--num-length-bins must be >= 1.")
+    if args.low_rank_dim < 0:
+        raise SystemExit("--low-rank-dim must be >= 0.")
+    if not 0.0 <= args.holdout_ratio < 1.0:
+        raise SystemExit("--holdout-ratio must be in [0, 1).")
+    if args.selection_split == "val" and args.holdout_ratio <= 0.0:
+        raise SystemExit("--selection-split=val requires --holdout-ratio > 0.")
 
 
 def _load_jsonl_rows(path: str) -> list[dict[str, object]]:
@@ -328,6 +381,54 @@ def _metadata_rows_from_ids(
 
 def _evaluate_logits(labels: torch.Tensor, logits: torch.Tensor) -> dict[str, float]:
     return evaluate_binary_metrics(labels, logits)
+
+
+def _subset_meta_rows(rows: list[PromptMetadata], indices: torch.Tensor) -> list[PromptMetadata]:
+    return [rows[int(idx)] for idx in indices.tolist()]
+
+
+def _build_holdout_split(
+    *,
+    rows: list[PromptMetadata],
+    labels: torch.Tensor,
+    ratio: float,
+    seed: int,
+) -> tuple[torch.Tensor, torch.Tensor | None]:
+    total = int(labels.size(0))
+    all_idx = torch.arange(total, dtype=torch.long)
+    if ratio <= 0.0:
+        return all_idx, None
+
+    groups: dict[tuple[str, int], list[int]] = {}
+    for idx, (row, label) in enumerate(zip(rows, labels.tolist(), strict=True)):
+        key = (row.source, int(label))
+        groups.setdefault(key, []).append(idx)
+
+    rng = np.random.default_rng(seed)
+    train_idx: list[int] = []
+    holdout_idx: list[int] = []
+    for indices in groups.values():
+        group_arr = np.asarray(indices, dtype=np.int64)
+        rng.shuffle(group_arr)
+        if group_arr.size <= 1:
+            train_idx.extend(int(v) for v in group_arr.tolist())
+            continue
+        holdout_count = int(round(group_arr.size * ratio))
+        if group_arr.size >= 4 and holdout_count < 1:
+            holdout_count = 1
+        holdout_count = min(holdout_count, group_arr.size - 1)
+        if holdout_count > 0:
+            holdout_idx.extend(int(v) for v in group_arr[:holdout_count].tolist())
+            train_idx.extend(int(v) for v in group_arr[holdout_count:].tolist())
+        else:
+            train_idx.extend(int(v) for v in group_arr.tolist())
+
+    if not holdout_idx:
+        raise SystemExit("Requested --holdout-ratio > 0 but no holdout rows were created.")
+    return (
+        torch.tensor(sorted(train_idx), dtype=torch.long),
+        torch.tensor(sorted(holdout_idx), dtype=torch.long),
+    )
 
 
 def _bin_metrics(
@@ -469,6 +570,30 @@ def _write_json(path: str, payload: dict[str, object]) -> None:
 def _write_jsonl(path: str, row: dict[str, object]) -> None:
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(row, sort_keys=True) + "\n")
+
+
+def _build_hidden_probe(args: argparse.Namespace, *, input_dim: int) -> tuple[nn.Module, dict[str, object]]:
+    probe_cfg = get_probe_config(
+        args.probe_preset,
+        hidden_dim=args.mlp_hidden_dim,
+        dropout=args.mlp_dropout,
+        depth=args.mlp_depth,
+    )
+    if args.low_rank_dim > 0:
+        if probe_cfg.probe_type != "mlp":
+            raise SystemExit("--low-rank-dim currently requires --probe-preset=mlp.")
+        model = LowRankMLPProbe(
+            input_dim=input_dim,
+            low_rank_dim=args.low_rank_dim,
+            hidden_dim=probe_cfg.hidden_dim,
+            dropout=probe_cfg.dropout,
+            depth=probe_cfg.depth,
+        )
+        model_cfg = probe_cfg.to_dict()
+        model_cfg["low_rank_dim"] = args.low_rank_dim
+        model_cfg["probe_type"] = "low_rank_mlp"
+        return model, model_cfg
+    return build_probe_model(input_dim=input_dim, probe_cfg=probe_cfg), probe_cfg.to_dict()
 
 
 def _resolved_feature_keys(
@@ -624,17 +749,38 @@ def main() -> None:
         tokenizer=tokenizer,
     )
 
-    train_labels_np = train_y.numpy().astype(int)
+    train_idx, holdout_idx = _build_holdout_split(
+        rows=train_meta_rows,
+        labels=train_y,
+        ratio=args.holdout_ratio,
+        seed=args.holdout_seed,
+    )
+    model_train_x = train_x.index_select(0, train_idx)
+    model_train_y = train_y.index_select(0, train_idx)
+    model_train_sample_ids = train_sample_ids.index_select(0, train_idx)
+    model_train_meta_rows = _subset_meta_rows(train_meta_rows, train_idx)
+
+    holdout_x: torch.Tensor | None = None
+    holdout_y: torch.Tensor | None = None
+    holdout_sample_ids: torch.Tensor | None = None
+    holdout_meta_rows: list[PromptMetadata] | None = None
+    if holdout_idx is not None:
+        holdout_x = train_x.index_select(0, holdout_idx)
+        holdout_y = train_y.index_select(0, holdout_idx)
+        holdout_sample_ids = train_sample_ids.index_select(0, holdout_idx)
+        holdout_meta_rows = _subset_meta_rows(train_meta_rows, holdout_idx)
+
+    train_labels_np = model_train_y.numpy().astype(int)
     metadata_models: dict[str, MetadataModel] = {}
     metadata_baselines: dict[str, dict[str, object]] = {}
     for feature_set in ("legacy", "strong"):
         meta_model = MetadataModel(feature_set=feature_set)
-        meta_model.fit(train_meta_rows, train_labels_np)
+        meta_model.fit(model_train_meta_rows, train_labels_np)
         metadata_models[feature_set] = meta_model
-        metadata_baselines[feature_set] = {
+        baseline_payload: dict[str, object] = {
             "train": _evaluate_logits(
-                train_y,
-                torch.tensor(meta_model.decision_function(train_meta_rows), dtype=torch.float32),
+                model_train_y,
+                torch.tensor(meta_model.decision_function(model_train_meta_rows), dtype=torch.float32),
             ),
             "natural": _evaluate_logits(
                 natural_y,
@@ -646,23 +792,43 @@ def main() -> None:
             ),
             "params": meta_model.to_json(),
         }
+        if holdout_y is not None and holdout_meta_rows is not None:
+            baseline_payload["val"] = _evaluate_logits(
+                holdout_y,
+                torch.tensor(meta_model.decision_function(holdout_meta_rows), dtype=torch.float32),
+            )
+        metadata_baselines[feature_set] = baseline_payload
     _write_json(os.path.join(args.out_dir, "metadata_baselines.json"), metadata_baselines)
 
     active_meta_model = metadata_models[args.metadata_feature_set]
-    train_meta_logits = active_meta_model.decision_function(train_meta_rows)
+    train_meta_logits = active_meta_model.decision_function(model_train_meta_rows)
+    holdout_meta_logits = None
+    if holdout_meta_rows is not None:
+        holdout_meta_logits = active_meta_model.decision_function(holdout_meta_rows)
     natural_meta_logits = active_meta_model.decision_function(natural_meta_rows)
     matched_meta_logits = active_meta_model.decision_function(matched_meta_rows)
 
     device = choose_device(args.device)
     train_loader = _build_loader(
-        train_x,
+        model_train_x,
         train_meta_logits,
-        train_y,
+        model_train_y,
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.num_workers,
         pin_memory=(device.type == "cuda"),
     )
+    holdout_loader = None
+    if holdout_x is not None and holdout_y is not None and holdout_meta_logits is not None:
+        holdout_loader = _build_loader(
+            holdout_x,
+            holdout_meta_logits,
+            holdout_y,
+            batch_size=args.batch_size,
+            shuffle=False,
+            num_workers=args.num_workers,
+            pin_memory=(device.type == "cuda"),
+        )
     natural_loader = _build_loader(
         natural_x,
         natural_meta_logits,
@@ -692,8 +858,8 @@ def main() -> None:
             warmup_steps = 1
         warmup_steps = min(warmup_steps, max(total_steps - 1, 0))
 
-    num_pos = int((train_y == 1).sum().item())
-    num_neg = int((train_y == 0).sum().item())
+    num_pos = int((model_train_y == 1).sum().item())
+    num_neg = int((model_train_y == 0).sum().item())
     if num_pos > 0 and num_neg > 0:
         pos_weight = torch.tensor(float(num_neg / num_pos), dtype=torch.float32, device=device)
     else:
@@ -708,13 +874,8 @@ def main() -> None:
         with open(metrics_jsonl, "w", encoding="utf-8"):
             pass
 
-        probe_cfg = get_probe_config(
-            args.probe_preset,
-            hidden_dim=args.mlp_hidden_dim,
-            dropout=args.mlp_dropout,
-            depth=args.mlp_depth,
-        )
-        model = build_probe_model(input_dim=int(train_x.size(1)), probe_cfg=probe_cfg).to(device)
+        model, probe_config_payload = _build_hidden_probe(args, input_dim=int(model_train_x.size(1)))
+        model = model.to(device)
         optimizer = torch.optim.AdamW(
             model.parameters(),
             lr=args.lr,
@@ -786,6 +947,18 @@ def main() -> None:
                 )
                 continue
 
+            val_metrics: dict[str, float] | None = None
+            if holdout_loader is not None and holdout_meta_rows is not None:
+                val_labels, val_logits = _evaluate_loader(model, holdout_loader, device)
+                val_metrics = _evaluate_logits(val_labels, val_logits)
+                val_metrics.update(
+                    _bin_metrics(
+                        rows=holdout_meta_rows,
+                        labels=val_labels,
+                        logits=val_logits,
+                        num_length_bins=args.num_length_bins,
+                    )
+                )
             natural_labels, natural_logits = _evaluate_loader(model, natural_loader, device)
             matched_labels, matched_logits = _evaluate_loader(model, matched_loader, device)
 
@@ -823,6 +996,9 @@ def main() -> None:
                 "train_roc_auc": train_metrics["roc_auc"],
                 "train_pr_auc": train_metrics["pr_auc"],
             }
+            if val_metrics is not None:
+                for key, value in val_metrics.items():
+                    row[f"val_{key}"] = value
             for prefix, metrics in (("natural", natural_metrics), ("matched", matched_metrics)):
                 for key, value in metrics.items():
                     row[f"{prefix}_{key}"] = value
@@ -844,12 +1020,14 @@ def main() -> None:
                         "state_dict": model.state_dict(),
                         "feature_key": feature_key,
                         "feature_keys": resolved_train_keys,
-                        "probe_config": probe_cfg.to_dict(),
+                        "probe_config": probe_config_payload,
                         "metadata_feature_set": args.metadata_feature_set,
                         "metadata_model": active_meta_model.to_json(),
                         "selection_split": args.selection_split,
                         "selection_metric": args.selection_metric,
                         "tie_breaker": args.tie_breaker,
+                        "holdout_ratio": args.holdout_ratio,
+                        "holdout_seed": args.holdout_seed,
                     },
                     os.path.join(seed_dir, "best.pt"),
                 )

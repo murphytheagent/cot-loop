@@ -1,0 +1,72 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{hyperref}
+
+\title{Prefill Round 6: Capacity-Pressure Check for Anchor + Last16}
+\author{}
+\date{2026-03-13 14:26 UTC}
+
+\begin{document}
+\maketitle
+
+\section*{Question}
+Round 5 found a modest gain from adding a coarse last-16 boundary summary on top of the metadata-aware last-token anchor, but that result still used raw feature concatenation and checkpoint selection on eval-side metrics. The next compact question was therefore stricter: does the \textbf{anchor + last16} lift survive once I (1) select checkpoints on a small train-side holdout instead of the eval set and (2) pressure-test the doubled-width input with a low-rank bottleneck?
+
+\section*{Setup}
+I reused the same fixed-split Round 4 tensors and changed only training / selection.
+
+\begin{itemize}
+  \item \textbf{Data}: unchanged from Rounds 4--5 (source-control train, natural test, source/length-matched test).
+  \item \textbf{Feature views}: unchanged from Round 5.
+  \item \textbf{Metadata branch}: the same validated legacy control.
+  \item \textbf{New selector}: carve a fixed \textbf{15\%} holdout from the train split, stratified by \texttt{source x label}; fit metadata and probe on the remaining \textbf{85\%}; select checkpoints by \textbf{holdout PR-AUC} with macro-F1 tie-break.
+  \item \textbf{Training}: same residual-over-metadata MLP family, 3 seeds.
+\end{itemize}
+
+Round 6 arms:
+\begin{itemize}
+  \item \textbf{Anchor}: all-layer last-token concat only.
+  \item \textbf{Anchor + last16}: the Round 5 raw concatenation arm.
+  \item \textbf{Anchor + last16 (low-rank 256)}: same two-view input, but the first wide map is factorized through a 256-d bottleneck before the 512-d hidden layer.
+\end{itemize}
+
+\section*{Main Results}
+\begin{center}
+\small
+\setlength{\tabcolsep}{4pt}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{@{}p{4.0cm}rrrrrr@{}}
+\toprule
+Arm & Natural PR & Natural ROC & Matched PR & Matched ROC & Matched bin PR & $\Delta$ Matched PR vs anchor \\
+\midrule
+Anchor & 0.4138 $\pm$ 0.0045 & 0.7407 & 0.6498 $\pm$ 0.0052 & 0.6836 & 0.6641 & 0.0000 \\
+Anchor + last16 & 0.4176 $\pm$ 0.0014 & 0.7512 & 0.6418 $\pm$ 0.0025 & 0.6849 & 0.6348 & -0.0080 \\
+Anchor + last16 (low-rank 256) & 0.4151 $\pm$ 0.0054 & 0.7487 & 0.6453 $\pm$ 0.0061 & 0.6867 & 0.6521 & -0.0045 \\
+\bottomrule
+\end{tabular}
+}
+\end{center}
+
+Under the same holdout-trained legacy metadata baseline, the matched PR-AUC is only \textbf{0.5493}, so all three hidden-state arms still retain substantial prompt-time signal above metadata. The Round 6 question is narrower: whether \textbf{last16} is a robust \emph{augmentation} to the anchor under cleaner selection and capacity control.
+
+\section*{Interpretation}
+\begin{itemize}
+  \item \textbf{The Round 5 augmentation does not survive the cleaner selector.} Once checkpoint selection moves off the eval set and onto a fixed train-side holdout, the \textbf{anchor itself} becomes the strongest matched-PR arm (\textbf{0.6498}), while raw \textbf{anchor + last16} drops below it on both matched PR-AUC (\textbf{-0.0080}) and matched within-bin PR-AUC (\textbf{-0.0293}).
+  \item \textbf{Capacity pressure helps diagnose the failure.} The low-rank bottleneck arm clearly improves over raw concatenation on the matched metrics (\textbf{+0.0035} matched PR-AUC and \textbf{+0.0173} matched bin PR-AUC versus raw concat), which suggests the extra boundary view is not totally useless. But it still does \emph{not} beat the anchor.
+  \item \textbf{Natural-test gains are not the right headline here.} Both augmented arms are slightly above the anchor on natural PR-AUC / ROC-AUC, but the stronger matched view says the added feature is not robust once prompt-length shortcuts are controlled and the selector is no longer test-facing.
+  \item \textbf{The main representation conclusion gets sharper again.} The all-layer last-token anchor remains the best default prefill representation in this family. If last16 carries complementary information, it is weaker and more fragile than Round 5 alone suggested.
+\end{itemize}
+
+\section*{Bottom Line}
+Round 6 changes the diagnosis more than the raw metric deltas suggest. The earlier \textbf{anchor + last16} gain was real enough to justify this follow-up, but under a stricter train-side holdout selector it no longer beats the anchor, and the low-rank bottleneck only partially recovers the loss. My read is:
+\begin{itemize}
+  \item keep the \textbf{anchor} as the default prefill view;
+  \item stop spending more rounds on static boundary-summary fusion alone;
+  \item move the next compact round to \textbf{training objective}, e.g.\ within-source$\times$length-bin ranking / residualized pairwise loss on the anchor (and, if desired, the low-rank two-view arm), because representation-only fusion is no longer the dominant uncertainty.
+\end{itemize}
+
+\end{document}
