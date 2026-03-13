@@ -29,6 +29,15 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset", required=True, help="Local JSONL prompt file.")
     parser.add_argument("--prompt-field", required=True)
     parser.add_argument("--out-json", required=True)
+    parser.add_argument(
+        "--out-details-jsonl",
+        default="",
+        help=(
+            "Optional JSONL path for per-example results. Each row records the "
+            "selected dataset index, source metadata, prompt lengths, "
+            "first-hit prefix length, and cumulative horizon labels."
+        ),
+    )
     parser.add_argument("--sample-size", type=int, default=0)
     parser.add_argument("--sample-seed", type=int, default=0)
     parser.add_argument("--num-length-bins", type=int, default=3)
@@ -112,24 +121,15 @@ def _assign_length_bins(
 
 
 def _sample_indices(
-    rows: list[dict[str, object]],
+    buckets: list[tuple[str, int]],
     *,
-    tokenizer,
-    prompt_field: str,
     sample_size: int,
     sample_seed: int,
-    num_length_bins: int,
 ) -> list[int]:
-    total = len(rows)
+    total = len(buckets)
     if sample_size <= 0 or sample_size >= total:
         return list(range(total))
 
-    buckets = _assign_length_bins(
-        rows,
-        tokenizer=tokenizer,
-        prompt_field=prompt_field,
-        num_length_bins=num_length_bins,
-    )
     by_bucket: dict[tuple[str, int], list[int]] = defaultdict(list)
     for idx, bucket in enumerate(buckets):
         by_bucket[bucket].append(idx)
@@ -217,15 +217,19 @@ def main() -> None:
         trust_remote_code=rollout_cfg.trust_remote_code,
         use_fast=True,
     )
-    selected_indices = _sample_indices(
+    bucket_assignments = _assign_length_bins(
         rows,
         tokenizer=tokenizer,
         prompt_field=args.prompt_field,
-        sample_size=args.sample_size,
-        sample_seed=args.sample_seed,
         num_length_bins=args.num_length_bins,
     )
+    selected_indices = _sample_indices(
+        bucket_assignments,
+        sample_size=args.sample_size,
+        sample_seed=args.sample_seed,
+    )
     sampled_rows = [rows[idx] for idx in selected_indices]
+    sampled_buckets = [bucket_assignments[idx] for idx in selected_indices]
     prompts = [
         build_prompt(tokenizer, str(row[args.prompt_field]), num_repetition=1)
         for row in sampled_rows
@@ -259,6 +263,39 @@ def main() -> None:
             "prevalence": positives / len(first_hits),
         }
 
+    prompt_lengths = [
+        len(tokenizer(str(row[args.prompt_field]), add_special_tokens=False)["input_ids"])
+        for row in sampled_rows
+    ]
+    details_rows = []
+    for sample_position, (dataset_index, row, bucket, prompt_length, first_hit) in enumerate(
+        zip(
+            selected_indices,
+            sampled_rows,
+            sampled_buckets,
+            prompt_lengths,
+            first_hits,
+            strict=True,
+        ),
+        start=1,
+    ):
+        detail = {
+            "sample_position": sample_position,
+            "dataset_index": int(dataset_index),
+            "source": str(row.get("source", "unknown")),
+            "length_bin": int(bucket[1]),
+            "prompt_char_length": len(str(row[args.prompt_field])),
+            "prompt_token_length": int(prompt_length),
+            "first_loop_prefix_length": int(first_hit) if first_hit is not None else None,
+            "eventual_loop_within_max_tokens": int(first_hit is not None),
+        }
+        source_sample_id = row.get("_source_sample_id")
+        if source_sample_id is not None:
+            detail["_source_sample_id"] = int(source_sample_id)
+        for horizon in horizons:
+            detail[f"loop_by_{horizon}"] = int(first_hit is not None and first_hit <= horizon)
+        details_rows.append(detail)
+
     payload = {
         "dataset": args.dataset,
         "prompt_field": args.prompt_field,
@@ -284,6 +321,8 @@ def main() -> None:
             "max": max(onset_values) if onset_values else None,
         },
     }
+    if args.out_details_jsonl:
+        payload["details_jsonl"] = args.out_details_jsonl
 
     out_dir = os.path.dirname(args.out_json)
     if out_dir:
@@ -291,6 +330,13 @@ def main() -> None:
     with open(args.out_json, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, sort_keys=True)
         f.write("\n")
+    if args.out_details_jsonl:
+        details_dir = os.path.dirname(args.out_details_jsonl)
+        if details_dir:
+            os.makedirs(details_dir, exist_ok=True)
+        with open(args.out_details_jsonl, "w", encoding="utf-8") as f:
+            for row in details_rows:
+                f.write(json.dumps(row, sort_keys=True) + "\n")
 
     print(json.dumps(payload, indent=2, sort_keys=True))
 
