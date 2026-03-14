@@ -12,6 +12,8 @@ ALL_STATISTICS = (
     "avg_loop_generation_length",
     "avg_first_loop_prefix_length",
     "max_length_hit_fraction",
+    "loop_max_length_hit_fraction",
+    "max_length_hit_loop_fraction",
     "generation_length_variance",
     "max_length_hit_success_fraction",
     "loop_success_fraction",
@@ -53,6 +55,7 @@ class WorkerAggregator:
     num_looped: int = 0
     num_max_length_hits: int = 0
     num_prompt_too_long: int = 0
+    num_looped_and_max_length_hit: int = 0
     num_correct_and_looped: int = 0
     num_correct_and_max_length_hit: int = 0
     length_sum: int = 0
@@ -75,6 +78,7 @@ def merge_aggregators(aggregators: Iterable[WorkerAggregator]) -> WorkerAggregat
         merged.num_looped += int(agg.num_looped)
         merged.num_max_length_hits += int(agg.num_max_length_hits)
         merged.num_prompt_too_long += int(agg.num_prompt_too_long)
+        merged.num_looped_and_max_length_hit += int(agg.num_looped_and_max_length_hit)
         merged.num_correct_and_looped += int(agg.num_correct_and_looped)
         merged.num_correct_and_max_length_hit += int(agg.num_correct_and_max_length_hit)
         merged.length_sum += int(agg.length_sum)
@@ -120,6 +124,16 @@ def compute_metrics(
             metrics[name] = _safe_div(agg.first_loop_prefix_sum, agg.num_looped)
         elif name == "max_length_hit_fraction":
             metrics[name] = _safe_div(agg.num_max_length_hits, agg.num_generated)
+        elif name == "loop_max_length_hit_fraction":
+            metrics[name] = _safe_div(
+                agg.num_looped_and_max_length_hit,
+                agg.num_looped,
+            )
+        elif name == "max_length_hit_loop_fraction":
+            metrics[name] = _safe_div(
+                agg.num_looped_and_max_length_hit,
+                agg.num_max_length_hits,
+            )
         elif name == "generation_length_variance":
             if n == 0:
                 metrics[name] = None

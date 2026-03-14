@@ -498,6 +498,8 @@ def _collect_worker_stats(
                     agg.first_loop_prefix_sum += first_loop_prefix
                 if max_length_hit:
                     agg.num_max_length_hits += 1
+                if loop_flag and max_length_hit:
+                    agg.num_looped_and_max_length_hit += 1
 
                 if collector_cfg.task_kind == "livecodebench_codegen":
                     agg.lcb_sample_records.append(
@@ -826,6 +828,9 @@ def main() -> None:
             "num_looped": agg.num_looped,
             "num_max_length_hits": agg.num_max_length_hits,
             "num_prompt_too_long": agg.num_prompt_too_long,
+            "num_looped_and_max_length_hit": agg.num_looped_and_max_length_hit,
+            "num_correct_and_looped": agg.num_correct_and_looped,
+            "num_correct_and_max_length_hit": agg.num_correct_and_max_length_hit,
         },
         "metrics": metrics,
     }
