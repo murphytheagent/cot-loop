@@ -1,6 +1,6 @@
 # Docs Index
 
-Last updated: 2026-03-05 18:45 UTC
+Last updated: 2026-03-14 15:52 UTC
 
 Purpose:
 - Store long-lived project documentation that is not part of the main README.
@@ -10,3 +10,4 @@ Current docs and references:
 - Project roadmap: ../roadmap.md
 - Consolidated findings: ../outputs/pr2_experiment_findings_consolidated.md
 - Consolidated findings PDF: ../outputs/pr2_experiment_findings_consolidated_pdf/pr2_experiment_findings_consolidated.pdf
+- Detailed reopened-round summary PDF: ../outputs/prefill_rounds_1_to_12_detailed_summary/prefill_rounds_1_to_12_detailed_summary.pdf

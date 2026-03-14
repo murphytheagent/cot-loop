@@ -1,6 +1,6 @@
 # Roadmap - CoT Loop Detection
 
-Last updated: 2026-03-13 17:04 UTC
+Last updated: 2026-03-14 15:52 UTC
 
 Scope:
 - Build and validate a probe pipeline for CoT loop detection across prefill and completion feature views.
@@ -9,10 +9,11 @@ Scope:
 ## Current Status
 - Milestone 1 gate: complete.
 - Milestone 2 gate: complete.
-- Active milestone: Milestone 3 (metadata-aware prefill residual validation).
-- Latest result: under the fixed Round 3 metadata-aware frame, simple boundary-summary replacements do not beat the all-layer last-token anchor, but `anchor + last16` gives a modest matched PR-AUC lift to `0.650` versus the Round 4 anchor at `0.642`.
-- Active experiment: Round 8 is running as a fixed-label order-sensitive suffix-view diagnostic (`job 1240`) to test whether preserving late prompt-token order can beat the Round 6 anchor without changing labels.
-- Active review surface: upstream PR #2 (`task/1772391564-ood-feature-ablation`) is still `OPEN` / `CLEAN` at head `50e0c9d`, but it now has `3` unresolved non-outdated review threads and no terminal local-review verdict inside the `300`-second maintenance bound.
+- Milestone 3 gate: complete.
+- Active milestone: Milestone 4 (cross-dataset validation).
+- Latest result: the metadata-aware prefill line has stopped moving. After the later representation and horizon-label rounds, the best prefill-only arm is still the Round 6 all-layer last-token anchor, so the active question is now how the rollout/loop behavior transfers across datasets rather than how to squeeze more from the one-bit prefill label.
+- Active experiment: the repaired `LiveCodeBench` rerun `1292` is still running on the pinned 4-GPU path after the earlier `1283` pass failed during post-generation grading; at the 2026-03-14 15:52 UTC checkpoint it had reached `880/1055` processed problems.
+- Active review surface: upstream PR #4 (`task/1773451376-rollout-stats`) is `OPEN` / `CLEAN` / `DRAFT` at head `24524fa` with `0` unresolved non-outdated review threads, but local review still lacks a terminal verdict, so merge remains held.
 
 ## Milestone 1 - Pipeline and multi-view infrastructure
 Status: done (2026-03-05 18:45 UTC)
@@ -29,14 +30,14 @@ Success criteria:
 - Completion-view and prefill-view performance are directly comparable on shared labels.
 
 ## Milestone 3 - Metadata-aware prefill residual validation
-Status: in progress (set 2026-03-13 13:05 UTC)
+Status: done (2026-03-13 21:44 UTC)
 Success criteria:
 - Re-run prefill follow-ups under fixed labels / metadata-aware controls instead of raw composition drift.
 - Determine whether any prompt-summary or augmentation beats the metadata-aware last-token anchor on matched evaluation.
 - Record the best prefill candidate and its incremental lift versus both metadata-only and anchor-only baselines.
 
 ## Milestone 4 - Cross-dataset validation
-Status: next (set 2026-03-13 13:05 UTC)
+Status: in progress (set 2026-03-14 02:21 UTC)
 Success criteria:
 - Replicate the current best prefill/completion findings on additional evaluation sets or model variants.
 - Measure whether the preferred feature view survives varied token budgets and source mixes.
