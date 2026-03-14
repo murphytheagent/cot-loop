@@ -10,11 +10,11 @@
       "temperature": 0.0,
       "max_tokens": 81920,
       "tp": 1,
-      "dp": 1,
+      "dp": 4,
       "dtype": "bfloat16",
       "max_model_len": 40960,
-      "max_num_seqs": 16,
-      "max_num_batched_tokens": null,
+      "max_num_seqs": 8,
+      "max_num_batched_tokens": 4096,
       "trust_remote_code": true
     },
     "seed": 0,
@@ -25,6 +25,8 @@
       "avg_loop_generation_length",
       "avg_first_loop_prefix_length",
       "max_length_hit_fraction",
+      "loop_max_length_hit_fraction",
+      "max_length_hit_loop_fraction",
       "generation_length_variance",
       "max_length_hit_success_fraction",
       "loop_success_fraction",
@@ -35,29 +37,34 @@
       "n": 30,
       "k": 20
     },
-    "timestamp": "2026-03-14T03:59:41.124334+00:00"
+    "timestamp": "2026-03-14T19:39:08.601100+00:00"
   },
   "counts": {
     "num_samples": 60,
     "num_generated": 60,
     "num_graded": 60,
-    "num_correct": 23,
-    "num_wrong": 37,
+    "num_correct": 22,
+    "num_wrong": 38,
     "num_looped": 10,
-    "num_max_length_hits": 10,
-    "num_prompt_too_long": 0
+    "num_max_length_hits": 9,
+    "num_prompt_too_long": 0,
+    "num_looped_and_max_length_hit": 9,
+    "num_correct_and_looped": 1,
+    "num_correct_and_max_length_hit": 1
   },
   "metrics": {
-    "success_fraction": 0.38333333333333336,
+    "success_fraction": 0.36666666666666664,
     "loop_fraction": 0.16666666666666666,
-    "avg_generation_length": 21672.883333333335,
-    "avg_loop_generation_length": 37178.0,
-    "avg_first_loop_prefix_length": 12283.1,
-    "max_length_hit_fraction": 0.16666666666666666,
-    "generation_length_variance": 133715967.23638886,
-    "max_length_hit_success_fraction": 0.1,
+    "avg_generation_length": 20931.4,
+    "avg_loop_generation_length": 38641.5,
+    "avg_first_loop_prefix_length": 11782.3,
+    "max_length_hit_fraction": 0.15,
+    "loop_max_length_hit_fraction": 0.9,
+    "max_length_hit_loop_fraction": 1.0,
+    "generation_length_variance": 124853340.00666666,
+    "max_length_hit_success_fraction": 0.1111111111111111,
     "loop_success_fraction": 0.1,
-    "avg_correct_generation_length": 12872.826086956522,
-    "avg_wrong_generation_length": 27143.18918918919
+    "avg_correct_generation_length": 13157.681818181818,
+    "avg_wrong_generation_length": 25431.973684210527
   }
 }
