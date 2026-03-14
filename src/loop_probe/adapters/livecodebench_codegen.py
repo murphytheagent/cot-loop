@@ -7,9 +7,10 @@ import sys
 from contextlib import contextmanager
 from datetime import datetime
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from ..collector import LcbSampleRecord
+if TYPE_CHECKING:
+    from ..collector import LcbSampleRecord
 
 _LCB_DATASET_REPO = "livecodebench/code_generation_lite"
 _LCB_RELEASE_FILES = {
