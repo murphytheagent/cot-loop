@@ -1,0 +1,72 @@
+{
+  "metadata": {
+    "dataset": "livecodebench_release_v6",
+    "config": null,
+    "split": "test",
+    "task_kind": "livecodebench_codegen",
+    "model_id": "Qwen/Qwen3-1.7B",
+    "generation_config": {
+      "model_id": "Qwen/Qwen3-1.7B",
+      "temperature": 0.0,
+      "max_tokens": 81920,
+      "tp": 1,
+      "dp": 4,
+      "dtype": "bfloat16",
+      "max_model_len": 40960,
+      "max_num_seqs": 8,
+      "max_num_batched_tokens": 4096,
+      "trust_remote_code": true
+    },
+    "seed": 0,
+    "statistics": [
+      "success_fraction",
+      "loop_fraction",
+      "avg_generation_length",
+      "avg_loop_generation_length",
+      "avg_first_loop_prefix_length",
+      "max_length_hit_fraction",
+      "loop_max_length_hit_fraction",
+      "max_length_hit_loop_fraction",
+      "generation_length_variance",
+      "max_length_hit_success_fraction",
+      "loop_success_fraction",
+      "avg_correct_generation_length",
+      "avg_wrong_generation_length"
+    ],
+    "loop_detector": {
+      "n": 30,
+      "k": 20
+    },
+    "timestamp": "2026-03-14T17:03:22.332876+00:00",
+    "lm_style": "CodeQwenInstruct",
+    "lcb_native_pass_at_1": 0.4928909952606635
+  },
+  "counts": {
+    "num_samples": 1055,
+    "num_generated": 1055,
+    "num_graded": 1055,
+    "num_correct": 520,
+    "num_wrong": 535,
+    "num_looped": 267,
+    "num_max_length_hits": 220,
+    "num_prompt_too_long": 0,
+    "num_looped_and_max_length_hit": 219,
+    "num_correct_and_looped": 9,
+    "num_correct_and_max_length_hit": 0
+  },
+  "metrics": {
+    "success_fraction": 0.4928909952606635,
+    "loop_fraction": 0.25308056872037915,
+    "avg_generation_length": 15678.590521327014,
+    "avg_loop_generation_length": 36290.49063670412,
+    "avg_first_loop_prefix_length": 11891.4531835206,
+    "max_length_hit_fraction": 0.20853080568720378,
+    "loop_max_length_hit_fraction": 0.8202247191011236,
+    "max_length_hit_loop_fraction": 0.9954545454545455,
+    "generation_length_variance": 200495355.147967,
+    "max_length_hit_success_fraction": 0.0,
+    "loop_success_fraction": 0.033707865168539325,
+    "avg_correct_generation_length": 5376.184615384615,
+    "avg_wrong_generation_length": 25692.143925233646
+  }
+}

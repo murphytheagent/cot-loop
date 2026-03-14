@@ -1,0 +1,74 @@
+{
+  "metadata": {
+    "dataset": "data/gpqa_diamond.csv",
+    "config": null,
+    "split": "test",
+    "task_kind": "multiple_choice_gpqa",
+    "model_id": "Qwen/Qwen3-1.7B",
+    "generation_config": {
+      "model_id": "Qwen/Qwen3-1.7B",
+      "temperature": 0.0,
+      "max_tokens": 81920,
+      "tp": 1,
+      "dp": 1,
+      "dtype": "bfloat16",
+      "max_model_len": 40960,
+      "max_num_seqs": 16,
+      "max_num_batched_tokens": null,
+      "trust_remote_code": true
+    },
+    "seed": 0,
+    "statistics": [
+      "success_fraction",
+      "loop_fraction",
+      "avg_generation_length",
+      "avg_loop_generation_length",
+      "avg_first_loop_prefix_length",
+      "max_length_hit_fraction",
+      "loop_max_length_hit_fraction",
+      "max_length_hit_loop_fraction",
+      "generation_length_variance",
+      "max_length_hit_success_fraction",
+      "loop_success_fraction",
+      "avg_correct_generation_length",
+      "avg_wrong_generation_length"
+    ],
+    "loop_detector": {
+      "n": 30,
+      "k": 20
+    },
+    "timestamp": "2026-03-14T05:51:20.208805+00:00",
+    "shuffle_policy": {
+      "kind": "seed_xor_sample_id",
+      "base_seed": 0
+    }
+  },
+  "counts": {
+    "num_samples": 198,
+    "num_generated": 198,
+    "num_graded": 198,
+    "num_correct": 74,
+    "num_wrong": 124,
+    "num_looped": 62,
+    "num_max_length_hits": 40,
+    "num_prompt_too_long": 0,
+    "num_looped_and_max_length_hit": 40,
+    "num_correct_and_looped": 17,
+    "num_correct_and_max_length_hit": 11
+  },
+  "metrics": {
+    "success_fraction": 0.37373737373737376,
+    "loop_fraction": 0.31313131313131315,
+    "avg_generation_length": 15109.20707070707,
+    "avg_loop_generation_length": 30961.564516129034,
+    "avg_first_loop_prefix_length": 6919.919354838709,
+    "max_length_hit_fraction": 0.20202020202020202,
+    "loop_max_length_hit_fraction": 0.6451612903225806,
+    "max_length_hit_loop_fraction": 1.0,
+    "generation_length_variance": 182281342.59853587,
+    "max_length_hit_success_fraction": 0.275,
+    "loop_success_fraction": 0.27419354838709675,
+    "avg_correct_generation_length": 13247.432432432432,
+    "avg_wrong_generation_length": 16220.266129032258
+  }
+}

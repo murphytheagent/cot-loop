@@ -1,0 +1,70 @@
+{
+  "metadata": {
+    "dataset": "TIGER-Lab/MMLU-Pro",
+    "config": null,
+    "split": "test",
+    "task_kind": "multiple_choice_mmlupro",
+    "model_id": "Qwen/Qwen3-1.7B",
+    "generation_config": {
+      "model_id": "Qwen/Qwen3-1.7B",
+      "temperature": 0.0,
+      "max_tokens": 81920,
+      "tp": 1,
+      "dp": 3,
+      "dtype": "bfloat16",
+      "max_model_len": 40960,
+      "max_num_seqs": 8,
+      "max_num_batched_tokens": 4096,
+      "trust_remote_code": true
+    },
+    "seed": 0,
+    "statistics": [
+      "success_fraction",
+      "loop_fraction",
+      "avg_generation_length",
+      "avg_loop_generation_length",
+      "avg_first_loop_prefix_length",
+      "max_length_hit_fraction",
+      "loop_max_length_hit_fraction",
+      "max_length_hit_loop_fraction",
+      "generation_length_variance",
+      "max_length_hit_success_fraction",
+      "loop_success_fraction",
+      "avg_correct_generation_length",
+      "avg_wrong_generation_length"
+    ],
+    "loop_detector": {
+      "n": 30,
+      "k": 20
+    },
+    "timestamp": "2026-03-14T09:07:37.043114+00:00"
+  },
+  "counts": {
+    "num_samples": 2000,
+    "num_generated": 2000,
+    "num_graded": 2000,
+    "num_correct": 857,
+    "num_wrong": 1143,
+    "num_looped": 138,
+    "num_max_length_hits": 61,
+    "num_prompt_too_long": 0,
+    "num_looped_and_max_length_hit": 61,
+    "num_correct_and_looped": 31,
+    "num_correct_and_max_length_hit": 6
+  },
+  "metrics": {
+    "success_fraction": 0.4285,
+    "loop_fraction": 0.069,
+    "avg_generation_length": 5066.569,
+    "avg_loop_generation_length": 23594.992753623188,
+    "avg_first_loop_prefix_length": 5709.0,
+    "max_length_hit_fraction": 0.0305,
+    "loop_max_length_hit_fraction": 0.4420289855072464,
+    "max_length_hit_loop_fraction": 1.0,
+    "generation_length_variance": 47975354.049239,
+    "max_length_hit_success_fraction": 0.09836065573770492,
+    "loop_success_fraction": 0.2246376811594203,
+    "avg_correct_generation_length": 3587.1948658109686,
+    "avg_wrong_generation_length": 6175.7760279965005
+  }
+}

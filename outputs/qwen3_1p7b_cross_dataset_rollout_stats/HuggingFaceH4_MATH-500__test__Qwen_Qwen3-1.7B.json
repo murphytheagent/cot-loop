@@ -1,0 +1,63 @@
+{
+  "metadata": {
+    "dataset": "HuggingFaceH4/MATH-500",
+    "config": null,
+    "split": "test",
+    "task_kind": "math_freeform",
+    "model_id": "Qwen/Qwen3-1.7B",
+    "generation_config": {
+      "model_id": "Qwen/Qwen3-1.7B",
+      "temperature": 0.0,
+      "max_tokens": 81920,
+      "tp": 1,
+      "dp": 1,
+      "dtype": "bfloat16",
+      "max_model_len": 40960,
+      "max_num_seqs": 16,
+      "max_num_batched_tokens": null,
+      "trust_remote_code": true
+    },
+    "seed": 0,
+    "statistics": [
+      "success_fraction",
+      "loop_fraction",
+      "avg_generation_length",
+      "avg_loop_generation_length",
+      "avg_first_loop_prefix_length",
+      "max_length_hit_fraction",
+      "generation_length_variance",
+      "max_length_hit_success_fraction",
+      "loop_success_fraction",
+      "avg_correct_generation_length",
+      "avg_wrong_generation_length"
+    ],
+    "loop_detector": {
+      "n": 30,
+      "k": 20
+    },
+    "timestamp": "2026-03-14T03:24:55.713389+00:00"
+  },
+  "counts": {
+    "num_samples": 500,
+    "num_generated": 500,
+    "num_graded": 500,
+    "num_correct": 356,
+    "num_wrong": 144,
+    "num_looped": 24,
+    "num_max_length_hits": 20,
+    "num_prompt_too_long": 0
+  },
+  "metrics": {
+    "success_fraction": 0.712,
+    "loop_fraction": 0.048,
+    "avg_generation_length": 6908.638,
+    "avg_loop_generation_length": 36385.041666666664,
+    "avg_first_loop_prefix_length": 7493.0,
+    "max_length_hit_fraction": 0.04,
+    "generation_length_variance": 76020072.22695601,
+    "max_length_hit_success_fraction": 0.25,
+    "loop_success_fraction": 0.25,
+    "avg_correct_generation_length": 5120.064606741573,
+    "avg_wrong_generation_length": 11330.388888888889
+  }
+}
