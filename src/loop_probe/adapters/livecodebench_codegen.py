@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
 
@@ -25,22 +26,34 @@ def _ensure_repo_on_path(repo_path: str) -> None:
         sys.path.insert(0, repo_path)
 
 
+@contextmanager
+def _repo_cwd(repo_path: str):
+    _require_repo_path(repo_path)
+    prev_cwd = os.getcwd()
+    os.chdir(repo_path)
+    try:
+        yield
+    finally:
+        os.chdir(prev_cwd)
+
+
 def _import_lcb_symbols(repo_path: str) -> dict[str, Any]:
     _ensure_repo_on_path(repo_path)
-    try:
-        from lcb_runner.evaluation import extract_instance_results
-        from lcb_runner.lm_styles import LMStyle
-        from lcb_runner.runner.scenario_router import (
-            build_prompt_benchmark,
-            get_metrics,
-            sort_and_extract_save_results,
-        )
-        from lcb_runner.utils.extraction_utils import extract_code
-        from lcb_runner.utils.scenarios import Scenario
-    except Exception as exc:
-        raise ImportError(
-            "Failed to import LiveCodeBench helpers from the provided checkout."
-        ) from exc
+    with _repo_cwd(repo_path):
+        try:
+            from lcb_runner.evaluation import extract_instance_results
+            from lcb_runner.lm_styles import LMStyle
+            from lcb_runner.runner.scenario_router import (
+                build_prompt_benchmark,
+                get_metrics,
+                sort_and_extract_save_results,
+            )
+            from lcb_runner.utils.extraction_utils import extract_code
+            from lcb_runner.utils.scenarios import Scenario
+        except Exception as exc:
+            raise ImportError(
+                "Failed to import LiveCodeBench helpers from the provided checkout."
+            ) from exc
 
     return {
         "extract_instance_results": extract_instance_results,
@@ -53,15 +66,11 @@ def _import_lcb_symbols(repo_path: str) -> dict[str, Any]:
     }
 
 
-def build_lcb_args(release_version: str) -> SimpleNamespace:
-    try:
-        from lcb_runner.utils.scenarios import Scenario
-    except Exception as exc:
-        raise ImportError(
-            "Failed to import LiveCodeBench Scenario. Ensure the repo is on sys.path first."
-        ) from exc
+def build_lcb_args(release_version: str, repo_path: str) -> SimpleNamespace:
+    symbols = _import_lcb_symbols(repo_path)
+    scenario = symbols["Scenario"].codegeneration
     return SimpleNamespace(
-        scenario=Scenario.codegeneration,
+        scenario=scenario,
         release_version=release_version,
         not_fast=False,
         start_date=None,
@@ -88,8 +97,9 @@ def _get_lm_style(model_id: str, override: str | None = None, repo_path: str = "
 
 def preflight(repo_path: str, release_version: str) -> None:
     symbols = _import_lcb_symbols(repo_path)
-    args_ns = build_lcb_args(release_version)
-    symbols["build_prompt_benchmark"](args_ns)
+    args_ns = build_lcb_args(release_version, repo_path)
+    with _repo_cwd(repo_path):
+        symbols["build_prompt_benchmark"](args_ns)
 
 
 def load_benchmark(
@@ -97,8 +107,9 @@ def load_benchmark(
     release_version: str,
 ):
     symbols = _import_lcb_symbols(repo_path)
-    args_ns = build_lcb_args(release_version)
-    benchmark, format_prompt = symbols["build_prompt_benchmark"](args_ns)
+    args_ns = build_lcb_args(release_version, repo_path)
+    with _repo_cwd(repo_path):
+        benchmark, format_prompt = symbols["build_prompt_benchmark"](args_ns)
     return benchmark, format_prompt
 
 
@@ -118,14 +129,15 @@ def build_prompts(
     )
     prompt_records: list[tuple[str, str]] = []
     selected = benchmark if max_samples is None else benchmark[:max_samples]
-    for instance in selected:
-        prompt = format_prompt(instance, lm_style)
-        if not isinstance(prompt, str):
-            raise SystemExit(
-                "LiveCodeBench prompt builder returned a non-string prompt. "
-                "Use an --lm-style-override that produces raw string prompts."
-            )
-        prompt_records.append((str(instance.question_id), prompt))
+    with _repo_cwd(repo_path):
+        for instance in selected:
+            prompt = format_prompt(instance, lm_style)
+            if not isinstance(prompt, str):
+                raise SystemExit(
+                    "LiveCodeBench prompt builder returned a non-string prompt. "
+                    "Use an --lm-style-override that produces raw string prompts."
+                )
+            prompt_records.append((str(instance.question_id), prompt))
     return prompt_records, lm_style.value
 
 
@@ -142,7 +154,8 @@ def extract_code_output(
         override=lm_style_override,
         repo_path=repo_path,
     )
-    extracted = symbols["extract_code"](response_text, lm_style)
+    with _repo_cwd(repo_path):
+        extracted = symbols["extract_code"](response_text, lm_style)
     return "" if extracted is None else str(extracted)
 
 
@@ -154,7 +167,7 @@ def evaluate_records(
     release_version: str,
 ) -> tuple[float | None, dict[str, bool]]:
     symbols = _import_lcb_symbols(repo_path)
-    args_ns = build_lcb_args(release_version)
+    args_ns = build_lcb_args(release_version, repo_path)
 
     by_question_id = {record.question_id: record for record in records}
     missing = [
@@ -174,17 +187,18 @@ def evaluate_records(
         )
         for instance in benchmark
     ]
-    save_results, combined_results = symbols["sort_and_extract_save_results"](
-        symbols["Scenario"].codegeneration,
-        save_results,
-    )
-    metrics = symbols["get_metrics"](
-        symbols["Scenario"].codegeneration,
-        args_ns,
-        benchmark,
-        combined_results,
-    )
-    graded = symbols["extract_instance_results"](metrics[1])
+    with _repo_cwd(repo_path):
+        save_results, combined_results = symbols["sort_and_extract_save_results"](
+            symbols["Scenario"].codegeneration,
+            save_results,
+        )
+        metrics = symbols["get_metrics"](
+            symbols["Scenario"].codegeneration,
+            args_ns,
+            benchmark,
+            combined_results,
+        )
+        graded = symbols["extract_instance_results"](metrics[1])
 
     pass_at_1 = metrics[0].get("pass@1")
     grading_by_question_id: dict[str, bool] = {}
