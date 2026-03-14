@@ -103,9 +103,15 @@ LM_STYLE_OVERRIDE="${LM_STYLE_OVERRIDE:-}"
 OUT="${OUT:-}"
 EXTRA_ARGS="${EXTRA_ARGS:-}"
 
-if [[ "${TASK_KIND}" == "multiple_choice_gpqa" && -z "${HF_TOKEN:-}" ]]; then
-  echo "HF_TOKEN is required for TASK_KIND=multiple_choice_gpqa." >&2
-  exit 1
+if [[ "${TASK_KIND}" == "multiple_choice_gpqa" ]]; then
+  DATASET_IS_LOCAL_FILE=0
+  if [[ -f "${DATASET}" ]]; then
+    DATASET_IS_LOCAL_FILE=1
+  fi
+  if [[ "${DATASET_IS_LOCAL_FILE}" -eq 0 && -z "${HF_TOKEN:-}" ]]; then
+    echo "HF_TOKEN is required for gated GPQA datasets, but local GPQA files can run without it." >&2
+    exit 1
+  fi
 fi
 
 if [[ "${TASK_KIND}" == "livecodebench_codegen" ]]; then
