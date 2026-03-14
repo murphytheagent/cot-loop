@@ -14,7 +14,8 @@
 .env.example
 
 # logs and caches
-logs/
+logs/*
+!logs/.gitkeep
 __pycache__/
 
 # experiment artifacts

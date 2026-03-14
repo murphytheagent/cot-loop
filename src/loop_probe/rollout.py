@@ -8,7 +8,12 @@ from .configs import RolloutConfig
 
 
 def resolve_sampling_defaults(model_id: str) -> tuple[float, int]:
-    gen_config = GenerationConfig.from_pretrained(model_id)
+    try:
+        gen_config = GenerationConfig.from_pretrained(model_id)
+    except OSError as exc:
+        if "generation_config.json" not in str(exc):
+            raise
+        return 1.0, -1
     top_p = gen_config.top_p if gen_config.top_p is not None else 1.0
     top_k = gen_config.top_k if gen_config.top_k is not None else -1
     if top_k == 0:
