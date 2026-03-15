@@ -90,16 +90,12 @@ DATASETS: tuple[DatasetInfo, ...] = (
         short_name="MMLU-Pro",
         task_kind="multiple_choice_mmlupro",
         expected_dataset="TIGER-Lab/MMLU-Pro",
-        description=(
-            "The TIGER-Lab MMLU-Pro test split, capped to 2000 examples for this "
-            "rollout pass."
-        ),
+        description="The TIGER-Lab MMLU-Pro test split for this rollout pass.",
         chat_format=(
             "Tokenizer chat template with one user turn containing the question, "
             "an A-J answer list, and the instruction that the final non-empty line "
             "must be exactly 'Answer: X'."
         ),
-        sample_note="Requested cap: at most 2000 samples.",
     ),
     DatasetInfo(
         key="livecodebench",
@@ -109,8 +105,8 @@ DATASETS: tuple[DatasetInfo, ...] = (
         task_kind="livecodebench_codegen",
         expected_dataset="livecodebench_release_v6",
         description=(
-            "1055 LiveCodeBench code-generation problems formed by concatenating "
-            "test.jsonl through test6.jsonl and sorting by question_id."
+            "A question-id-sorted slice of the LiveCodeBench release_v6 "
+            "code-generation benchmark."
         ),
         chat_format=(
             "LiveCodeBench's format_prompt_generation pipeline with LM style "
@@ -199,6 +195,35 @@ def _normalize_local_dataset_id(value: Any) -> Any:
     return value
 
 
+def _dataset_description(
+    info: DatasetInfo,
+    *,
+    max_samples: Any,
+) -> str:
+    if info.key == "mmlu_pro" and max_samples is not None:
+        return (
+            "The TIGER-Lab MMLU-Pro test split, capped to "
+            f"{int(max_samples)} examples for this rollout pass."
+        )
+    if info.key == "livecodebench" and max_samples is not None:
+        return (
+            "A question-id-sorted slice of the LiveCodeBench release_v6 "
+            f"code-generation benchmark, capped to {int(max_samples)} "
+            "problems for this rollout pass."
+        )
+    return info.description
+
+
+def _dataset_sample_note(
+    info: DatasetInfo,
+    *,
+    max_samples: Any,
+) -> str | None:
+    if max_samples is not None:
+        return f"Requested cap: at most {int(max_samples)} samples."
+    return info.sample_note
+
+
 def load_dataset_record(stats_dir: Path, info: DatasetInfo) -> dict[str, Any]:
     path = stats_dir / info.filename
     if not path.exists():
@@ -211,6 +236,7 @@ def load_dataset_record(stats_dir: Path, info: DatasetInfo) -> dict[str, Any]:
     counts = payload.get("counts", {})
     metrics = payload.get("metrics", {})
     generation = metadata.get("generation_config", {})
+    max_samples = metadata.get("max_samples")
     lcb_native_metrics = metadata.get("lcb_native_metrics", {})
     legacy_lcb_pass_at_1 = metadata.get("lcb_native_pass_at_1")
     if not lcb_native_metrics and legacy_lcb_pass_at_1 is not None:
@@ -243,14 +269,15 @@ def load_dataset_record(stats_dir: Path, info: DatasetInfo) -> dict[str, Any]:
         "display_name": info.display_name,
         "short_name": info.short_name,
         "task_kind": info.task_kind,
-        "description": info.description,
+        "description": _dataset_description(info, max_samples=max_samples),
         "chat_format": info.chat_format,
-        "sample_note": info.sample_note,
+        "sample_note": _dataset_sample_note(info, max_samples=max_samples),
         "dataset": metadata.get("dataset"),
         "dataset_config": metadata.get("config"),
         "split": metadata.get("split"),
         "model_id": metadata.get("model_id"),
         "timestamp": metadata.get("timestamp"),
+        "max_samples": max_samples,
         "statistics": list(metadata.get("statistics", [])),
         "loop_detector": metadata.get("loop_detector", {}),
         "generation_config": generation,

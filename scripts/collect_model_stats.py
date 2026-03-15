@@ -922,6 +922,7 @@ def main() -> None:
             "loop_detector": {"n": args.loop_n, "k": args.loop_k},
             "prompt_token_summary": _prompt_token_summary(agg),
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            **({"max_samples": args.max_samples} if args.max_samples is not None else {}),
             **(
                 {"release_version": args.release_version}
                 if args.task_kind == "livecodebench_codegen"
