@@ -36,11 +36,15 @@ class CollectorConfig:
 @dataclass(frozen=True)
 class LcbSampleRecord:
     question_id: str
+    generation_index: int
     code_output: str
     token_count: int
     prompt_token_count: int
+    total_token_count: int
     effective_max_tokens: int
+    max_model_len: int
     loop_flag: bool
+    max_length_hit: bool
     finish_reason: str
     prompt_too_long: bool
 
@@ -64,6 +68,9 @@ class WorkerAggregator:
     correct_length_sum: int = 0
     wrong_length_sum: int = 0
     first_loop_prefix_sum: int = 0
+    prompt_length_sum: int = 0
+    prompt_length_min: int | None = None
+    prompt_length_max: int | None = None
     lcb_sample_records: list[LcbSampleRecord] = field(default_factory=list)
 
 
@@ -87,6 +94,19 @@ def merge_aggregators(aggregators: Iterable[WorkerAggregator]) -> WorkerAggregat
         merged.correct_length_sum += int(agg.correct_length_sum)
         merged.wrong_length_sum += int(agg.wrong_length_sum)
         merged.first_loop_prefix_sum += int(agg.first_loop_prefix_sum)
+        merged.prompt_length_sum += int(agg.prompt_length_sum)
+        if agg.prompt_length_min is not None:
+            merged.prompt_length_min = (
+                agg.prompt_length_min
+                if merged.prompt_length_min is None
+                else min(merged.prompt_length_min, agg.prompt_length_min)
+            )
+        if agg.prompt_length_max is not None:
+            merged.prompt_length_max = (
+                agg.prompt_length_max
+                if merged.prompt_length_max is None
+                else max(merged.prompt_length_max, agg.prompt_length_max)
+            )
         merged.lcb_sample_records.extend(agg.lcb_sample_records)
     return merged
 

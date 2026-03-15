@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import os
 import random
-import re
 
 from datasets import load_dataset
 
-from ._common import load_local_rows, resolve_sample_id
+from ._common import (
+    extract_answer_letter_from_last_lines,
+    load_local_rows,
+    resolve_sample_id,
+)
 from ..types import DatasetSpec, SampleRecord
 
 GPQA_LETTERS = ("A", "B", "C", "D")
-_LETTER_PATTERN = re.compile(r"\b([A-D])\b")
 
 
 def _require_config(spec: DatasetSpec) -> None:
@@ -93,7 +95,9 @@ def build_mcq_prompt(tokenizer, question: str, options: list[str]) -> str:
     user_msg = (
         f"{question}\n\n"
         f"Answer choices:\n{option_block}\n\n"
-        "Respond with the single best answer letter."
+        "Think through the problem carefully if needed. "
+        "The final non-empty line must be exactly `Answer: X`, "
+        "where X is one of A, B, C, or D."
     )
     return tokenizer.apply_chat_template(
         [{"role": "user", "content": user_msg}],
@@ -103,7 +107,10 @@ def build_mcq_prompt(tokenizer, question: str, options: list[str]) -> str:
 
 
 def grade(response: str, gold_letter: str) -> bool:
-    matches = _LETTER_PATTERN.findall(response.upper())
-    if not matches:
+    predicted = extract_answer_letter_from_last_lines(
+        response,
+        GPQA_LETTERS,
+    )
+    if predicted is None:
         return False
-    return matches[-1] == gold_letter
+    return predicted == gold_letter

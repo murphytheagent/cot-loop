@@ -1,6 +1,6 @@
 # Roadmap - CoT Loop Detection
 
-Last updated: 2026-03-14 15:52 UTC
+Last updated: 2026-03-15 00:22 UTC
 
 Scope:
 - Build and validate a probe pipeline for CoT loop detection across prefill and completion feature views.
@@ -12,8 +12,8 @@ Scope:
 - Milestone 3 gate: complete.
 - Active milestone: Milestone 4 (cross-dataset validation).
 - Latest result: the metadata-aware prefill line has stopped moving. After the later representation and horizon-label rounds, the best prefill-only arm is still the Round 6 all-layer last-token anchor, so the active question is now how the rollout/loop behavior transfers across datasets rather than how to squeeze more from the one-bit prefill label.
-- Active experiment: the repaired `LiveCodeBench` rerun `1292` is still running on the pinned 4-GPU path after the earlier `1283` pass failed during post-generation grading; at the 2026-03-14 15:52 UTC checkpoint it had reached `880/1055` processed problems.
-- Active review surface: upstream PR #4 (`task/1773451376-rollout-stats`) is `OPEN` / `CLEAN` / `DRAFT` at head `24524fa` with `0` unresolved non-outdated review threads, but local review still lacks a terminal verdict, so merge remains held.
+- Active experiment: none. The five-dataset bundle is complete, and the current executable work is a pre-rerun repair pass on the rollout-statistics module rather than another active Slurm chain.
+- Active review surface: the rollout-statistics contract patch is now local-only on a follow-up branch derived from the earlier PR #4 line; before the next experiment sweep, the branch needs one more project commit plus human approval to rerun the datasets under the repaired contract.
 
 ## Milestone 1 - Pipeline and multi-view infrastructure
 Status: done (2026-03-05 18:45 UTC)

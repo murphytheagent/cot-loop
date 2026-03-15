@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import csv
 import json
+import re
+from collections.abc import Iterable
+
+_ANSWER_LINE_PATTERN = re.compile(r"^Answer: ([A-Z])$")
 
 
 def resolve_sample_id(value: object, default: int) -> int:
@@ -27,3 +31,30 @@ def load_local_rows(path: str) -> list[dict[str, object]]:
                 continue
             rows.append(json.loads(line))
     return rows
+
+
+def extract_answer_letter_from_last_lines(
+    response: str,
+    valid_letters: Iterable[str],
+    *,
+    max_lines: int = 6,
+) -> str | None:
+    allowed = {
+        str(letter).strip().upper()
+        for letter in valid_letters
+        if str(letter).strip()
+    }
+    if not allowed:
+        raise ValueError("valid_letters must contain at least one non-empty letter.")
+
+    lines = [line.strip() for line in response.splitlines() if line.strip()]
+    if not lines:
+        return None
+    candidate = lines[-1]
+    match = _ANSWER_LINE_PATTERN.match(candidate)
+    if not match:
+        return None
+    letter = match.group(1).upper()
+    if letter in allowed:
+        return letter
+    return None

@@ -4,6 +4,7 @@ import json
 import os
 import re
 import sys
+from collections import defaultdict
 from contextlib import contextmanager
 from datetime import datetime
 from types import SimpleNamespace
@@ -256,28 +257,54 @@ def evaluate_records(
     *,
     repo_path: str,
     release_version: str,
-) -> tuple[float | None, dict[str, bool]]:
+) -> tuple[dict[str, float | None], dict[tuple[str, int], bool]]:
     symbols = _import_lcb_symbols(repo_path)
     args_ns = build_lcb_args(release_version, repo_path)
 
-    by_question_id = {record.question_id: record for record in records}
-    missing = [
+    records_by_question_id: dict[str, list[LcbSampleRecord]] = defaultdict(list)
+    prompt_too_long_question_ids: set[str] = set()
+    for record in records:
+        if record.prompt_too_long:
+            prompt_too_long_question_ids.add(record.question_id)
+            continue
+        records_by_question_id[record.question_id].append(record)
+
+    missing_question_ids = [
         str(instance.question_id)
         for instance in benchmark
-        if str(instance.question_id) not in by_question_id
+        if str(instance.question_id) not in records_by_question_id
+        and str(instance.question_id) not in prompt_too_long_question_ids
     ]
-    if missing:
+    if missing_question_ids:
         raise RuntimeError(
-            f"Missing LiveCodeBench records for question_id(s): {missing[:10]}"
+            "Missing LiveCodeBench records for non-skipped question_id(s): "
+            f"{missing_question_ids[:10]}"
         )
 
-    save_results = [
-        instance.insert_output(
-            [by_question_id[str(instance.question_id)].code_output],
-            [by_question_id[str(instance.question_id)].code_output],
+    selected_benchmark = []
+    record_keys_by_instance: list[list[tuple[str, int]]] = []
+    save_results = []
+    for instance in benchmark:
+        question_id = str(instance.question_id)
+        if question_id not in records_by_question_id:
+            continue
+        instance_records = sorted(
+            records_by_question_id[question_id],
+            key=lambda record: record.generation_index,
         )
-        for instance in benchmark
-    ]
+        outputs = [record.code_output for record in instance_records]
+        selected_benchmark.append(instance)
+        record_keys_by_instance.append(
+            [
+                (record.question_id, record.generation_index)
+                for record in instance_records
+            ]
+        )
+        save_results.append(instance.insert_output(outputs, outputs))
+
+    if not selected_benchmark:
+        return {}, {}
+
     with _repo_cwd(repo_path):
         save_results, combined_results = symbols["sort_and_extract_save_results"](
             symbols["Scenario"].codegeneration,
@@ -286,15 +313,29 @@ def evaluate_records(
         metrics = symbols["get_metrics"](
             symbols["Scenario"].codegeneration,
             args_ns,
-            benchmark,
+            selected_benchmark,
             combined_results,
         )
         graded = symbols["extract_instance_results"](metrics[1])
 
-    pass_at_1 = metrics[0].get("pass@1")
-    grading_by_question_id: dict[str, bool] = {}
-    for instance, instance_grades in zip(benchmark, graded):
-        passed = bool(instance_grades[0]) if instance_grades else False
-        grading_by_question_id[str(instance.question_id)] = passed
+    if len(graded) != len(record_keys_by_instance):
+        raise RuntimeError(
+            "LiveCodeBench returned a grade list with a different instance count "
+            f"({len(graded)} vs {len(record_keys_by_instance)})."
+        )
 
-    return float(pass_at_1) if pass_at_1 is not None else None, grading_by_question_id
+    grading_by_record_key: dict[tuple[str, int], bool] = {}
+    for record_keys, instance_grades in zip(record_keys_by_instance, graded):
+        if len(instance_grades) != len(record_keys):
+            raise RuntimeError(
+                "LiveCodeBench returned a different number of per-sample grades than "
+                f"generated outputs ({len(instance_grades)} vs {len(record_keys)})."
+            )
+        for record_key, passed in zip(record_keys, instance_grades):
+            grading_by_record_key[record_key] = bool(passed)
+
+    native_metrics = {
+        str(name): float(value) if value is not None else None
+        for name, value in metrics[0].items()
+    }
+    return native_metrics, grading_by_record_key

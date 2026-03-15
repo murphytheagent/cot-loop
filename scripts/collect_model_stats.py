@@ -49,6 +49,7 @@ TASK_CHOICES = (
     "multiple_choice_mmlupro",
     "livecodebench_codegen",
 )
+STATS_CONTRACT_VERSION = "rollout_stats_v2"
 
 
 @dataclass(frozen=True)
@@ -70,7 +71,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--question-field", default="question")
     parser.add_argument("--answer-field", default="answer")
     parser.add_argument("--model-id", default="Qwen/Qwen3-1.7B")
-    parser.add_argument("--temperature", type=float, default=0.0)
+    parser.add_argument("--temperature", type=float, default=0.2)
+    parser.add_argument("--num-generations", type=int, default=10)
     parser.add_argument("--max-tokens", type=int, default=81920)
     parser.add_argument("--max-model-len", type=int, default=40960)
     parser.add_argument("--tp", type=int, default=1)
@@ -153,6 +155,22 @@ def _effective_max_tokens(prompt_len: int, rollout_cfg: RolloutConfig) -> int:
     return min(rollout_cfg.max_tokens, max(0, rollout_cfg.max_model_len - prompt_len))
 
 
+def _total_token_count(prompt_len: int, token_count: int) -> int:
+    return prompt_len + token_count
+
+
+def _hit_max_model_len(
+    *,
+    prompt_len: int,
+    token_count: int,
+    finish_reason: str,
+    rollout_cfg: RolloutConfig,
+) -> bool:
+    if finish_reason != "length":
+        return False
+    return _total_token_count(prompt_len, token_count) >= rollout_cfg.max_model_len
+
+
 def _run_dataset_preflight(args: argparse.Namespace) -> None:
     if (
         not os.path.exists(args.dataset)
@@ -216,10 +234,13 @@ def _build_rollout_config(args: argparse.Namespace) -> RolloutConfig:
         raise SystemExit("--loop-n must be >= 1.")
     if args.loop_k < 2:
         raise SystemExit("--loop-k must be >= 2.")
+    if args.num_generations < 1:
+        raise SystemExit("--num-generations must be >= 1.")
 
     return RolloutConfig(
         model_id=args.model_id,
         temperature=args.temperature,
+        num_generations=args.num_generations,
         max_tokens=args.max_tokens,
         tp=args.tp,
         dp=args.dp,
@@ -379,6 +400,14 @@ def _collect_worker_stats(
     rollout_cfg = collector_cfg.rollout_cfg
     if rollout_cfg.max_num_seqs is not None and rollout_cfg.max_num_seqs < 1:
         raise SystemExit("--max-num-seqs must be >= 1 when provided.")
+    if (
+        rollout_cfg.max_num_seqs is not None
+        and rollout_cfg.max_num_seqs < rollout_cfg.num_generations
+    ):
+        raise SystemExit(
+            "--max-num-seqs must be >= --num-generations when sampling multiple "
+            "generations per prompt."
+        )
 
     top_p, top_k = resolve_sampling_defaults(rollout_cfg.model_id)
     tokenizer = AutoTokenizer.from_pretrained(
@@ -412,7 +441,10 @@ def _collect_worker_stats(
 
     llm = LLM(**llm_kwargs)
 
-    chunk_size = rollout_cfg.max_num_seqs if rollout_cfg.max_num_seqs is not None else len(items)
+    if rollout_cfg.max_num_seqs is not None:
+        chunk_size = max(1, rollout_cfg.max_num_seqs // rollout_cfg.num_generations)
+    else:
+        chunk_size = len(items)
     for start in range(0, len(items), chunk_size):
         end = min(start + chunk_size, len(items))
         batch_items = items[start:end]
@@ -427,6 +459,17 @@ def _collect_worker_stats(
         for item, input_ids in zip(batch_items, prompt_input_ids):
             agg.num_samples_seen += 1
             prompt_len = len(input_ids)
+            agg.prompt_length_sum += prompt_len
+            agg.prompt_length_min = (
+                prompt_len
+                if agg.prompt_length_min is None
+                else min(agg.prompt_length_min, prompt_len)
+            )
+            agg.prompt_length_max = (
+                prompt_len
+                if agg.prompt_length_max is None
+                else max(agg.prompt_length_max, prompt_len)
+            )
             effective_max = _effective_max_tokens(prompt_len, rollout_cfg)
             if effective_max < 1:
                 agg.num_prompt_too_long += 1
@@ -434,11 +477,15 @@ def _collect_worker_stats(
                     agg.lcb_sample_records.append(
                         LcbSampleRecord(
                             question_id=item.question_id or "",
+                            generation_index=-1,
                             code_output="",
                             token_count=0,
                             prompt_token_count=prompt_len,
+                            total_token_count=prompt_len,
                             effective_max_tokens=effective_max,
+                            max_model_len=rollout_cfg.max_model_len,
                             loop_flag=False,
+                            max_length_hit=False,
                             finish_reason="prompt_too_long",
                             prompt_too_long=True,
                         )
@@ -447,88 +494,97 @@ def _collect_worker_stats(
             valid_items.append((item, prompt_len, effective_max))
 
         if valid_items:
-            sampling_params = SamplingParams(
-                temperature=rollout_cfg.temperature,
-                top_p=top_p,
-                top_k=top_k,
-                max_tokens=rollout_cfg.max_tokens,
-                n=1,
-                repetition_penalty=1.0,
-                seed=collector_cfg.seed + rank * 100_000 + start,
-            )
-            outputs = llm.generate(
-                [item.prompt for item, _, _ in valid_items],
-                sampling_params,
-            )
-            if len(outputs) != len(valid_items):
-                raise RuntimeError(
-                    f"Expected {len(valid_items)} outputs, got {len(outputs)}."
+            for item, prompt_len, effective_max in valid_items:
+                sampling_params = SamplingParams(
+                    temperature=rollout_cfg.temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    max_tokens=rollout_cfg.max_tokens,
+                    n=rollout_cfg.num_generations,
+                    repetition_penalty=1.0,
+                    seed=collector_cfg.seed + item.sample_id,
                 )
-
-            for (item, prompt_len, effective_max), output in zip(valid_items, outputs):
-                if len(output.outputs) != 1:
+                outputs = llm.generate([item.prompt], sampling_params)
+                if len(outputs) != 1:
                     raise RuntimeError(
-                        f"Expected 1 output per prompt, got {len(output.outputs)}."
+                        f"Expected 1 prompt output, got {len(outputs)}."
                     )
-                sample = output.outputs[0]
-                text = str(getattr(sample, "text", ""))
-                token_ids = getattr(sample, "token_ids", None)
-                if not token_ids:
-                    token_ids = tokenizer.encode(text, add_special_tokens=False)
-                token_count = len(token_ids)
-                finish_reason = _normalize_finish_reason(
-                    getattr(sample, "finish_reason", None)
-                    or getattr(output, "finish_reason", None)
-                    or getattr(sample, "stop_reason", None)
-                )
-                first_loop_prefix = first_ngram_loop_prefix_length(
-                    token_ids,
-                    n=loop_n,
-                    k=loop_k,
-                )
-                loop_flag = first_loop_prefix is not None
-                max_length_hit = finish_reason == "length" and token_count == effective_max
-
-                agg.num_generated += 1
-                agg.length_sum += token_count
-                agg.length_sq_sum += token_count * token_count
-                if loop_flag and first_loop_prefix is not None:
-                    agg.num_looped += 1
-                    agg.loop_length_sum += token_count
-                    agg.first_loop_prefix_sum += first_loop_prefix
-                if max_length_hit:
-                    agg.num_max_length_hits += 1
-                if loop_flag and max_length_hit:
-                    agg.num_looped_and_max_length_hit += 1
-
-                if collector_cfg.task_kind == "livecodebench_codegen":
-                    agg.lcb_sample_records.append(
-                        LcbSampleRecord(
-                            question_id=item.question_id or "",
-                            code_output=livecodebench_codegen.extract_code_output(
-                                text,
-                                repo_path=collector_cfg.livecodebench_repo or "",
-                                model_id=rollout_cfg.model_id,
-                                lm_style_override=collector_cfg.lm_style_override,
-                            ),
-                            token_count=token_count,
-                            prompt_token_count=prompt_len,
-                            effective_max_tokens=effective_max,
-                            loop_flag=loop_flag,
-                            finish_reason=finish_reason,
-                            prompt_too_long=False,
-                        )
+                output = outputs[0]
+                if len(output.outputs) != rollout_cfg.num_generations:
+                    raise RuntimeError(
+                        "Expected "
+                        f"{rollout_cfg.num_generations} output(s) per prompt, got "
+                        f"{len(output.outputs)}."
                     )
-                else:
-                    _update_qa_stats(
-                        agg,
-                        task_kind=collector_cfg.task_kind,
-                        item=item,
-                        response_text=text,
+                for generation_index, sample in enumerate(output.outputs):
+                    text = str(getattr(sample, "text", ""))
+                    token_ids = getattr(sample, "token_ids", None)
+                    if not token_ids:
+                        token_ids = tokenizer.encode(text, add_special_tokens=False)
+                    token_count = len(token_ids)
+                    total_token_count = _total_token_count(prompt_len, token_count)
+                    finish_reason = _normalize_finish_reason(
+                        getattr(sample, "finish_reason", None)
+                        or getattr(output, "finish_reason", None)
+                        or getattr(sample, "stop_reason", None)
+                    )
+                    first_loop_prefix = first_ngram_loop_prefix_length(
+                        token_ids,
+                        n=loop_n,
+                        k=loop_k,
+                    )
+                    loop_flag = first_loop_prefix is not None
+                    max_length_hit = _hit_max_model_len(
+                        prompt_len=prompt_len,
                         token_count=token_count,
-                        loop_flag=loop_flag,
-                        max_length_hit=max_length_hit,
+                        finish_reason=finish_reason,
+                        rollout_cfg=rollout_cfg,
                     )
+
+                    agg.num_generated += 1
+                    agg.length_sum += token_count
+                    agg.length_sq_sum += token_count * token_count
+                    if loop_flag and first_loop_prefix is not None:
+                        agg.num_looped += 1
+                        agg.loop_length_sum += token_count
+                        agg.first_loop_prefix_sum += first_loop_prefix
+                    if max_length_hit:
+                        agg.num_max_length_hits += 1
+                    if loop_flag and max_length_hit:
+                        agg.num_looped_and_max_length_hit += 1
+
+                    if collector_cfg.task_kind == "livecodebench_codegen":
+                        agg.lcb_sample_records.append(
+                            LcbSampleRecord(
+                                question_id=item.question_id or "",
+                                generation_index=generation_index,
+                                code_output=livecodebench_codegen.extract_code_output(
+                                    text,
+                                    repo_path=collector_cfg.livecodebench_repo or "",
+                                    model_id=rollout_cfg.model_id,
+                                    lm_style_override=collector_cfg.lm_style_override,
+                                ),
+                                token_count=token_count,
+                                prompt_token_count=prompt_len,
+                                total_token_count=total_token_count,
+                                effective_max_tokens=effective_max,
+                                max_model_len=rollout_cfg.max_model_len,
+                                loop_flag=loop_flag,
+                                max_length_hit=max_length_hit,
+                                finish_reason=finish_reason,
+                                prompt_too_long=False,
+                            )
+                        )
+                    else:
+                        _update_qa_stats(
+                            agg,
+                            task_kind=collector_cfg.task_kind,
+                            item=item,
+                            response_text=text,
+                            token_count=token_count,
+                            loop_flag=loop_flag,
+                            max_length_hit=max_length_hit,
+                        )
 
         print(
             f"[collect-dp-rank {rank}] processed {end}/{len(items)} prompts",
@@ -725,14 +781,30 @@ def _apply_lcb_grades(
     *,
     repo_path: str,
     release_version: str,
-) -> float | None:
-    pass_at_1, grading_by_question_id = livecodebench_codegen.evaluate_records(
+) -> dict[str, float | None]:
+    native_metrics, grading_by_record_key = livecodebench_codegen.evaluate_records(
         benchmark,
         agg.lcb_sample_records,
         repo_path=repo_path,
         release_version=release_version,
     )
-    agg.num_graded = len(grading_by_question_id)
+    records_by_key = {}
+    for record in agg.lcb_sample_records:
+        if record.prompt_too_long:
+            continue
+        record_key = (record.question_id, record.generation_index)
+        if record_key in records_by_key:
+            raise RuntimeError(f"Duplicate LiveCodeBench record key: {record_key}")
+        records_by_key[record_key] = record
+
+    missing_keys = sorted(set(records_by_key) - set(grading_by_record_key))
+    if missing_keys:
+        raise RuntimeError(
+            "Missing LiveCodeBench grades for generated records: "
+            f"{missing_keys[:10]}"
+        )
+
+    agg.num_graded = 0
     agg.num_correct = 0
     agg.num_wrong = 0
     agg.correct_length_sum = 0
@@ -740,24 +812,20 @@ def _apply_lcb_grades(
     agg.num_correct_and_looped = 0
     agg.num_correct_and_max_length_hit = 0
 
-    by_question_id = {record.question_id: record for record in agg.lcb_sample_records}
-    for question_id, passed in grading_by_question_id.items():
-        record = by_question_id[question_id]
-        max_length_hit = (
-            record.finish_reason == "length"
-            and record.token_count == record.effective_max_tokens
-        )
+    for record_key, passed in grading_by_record_key.items():
+        record = records_by_key[record_key]
+        agg.num_graded += 1
         if passed:
             agg.num_correct += 1
             agg.correct_length_sum += record.token_count
             if record.loop_flag:
                 agg.num_correct_and_looped += 1
-            if max_length_hit:
+            if record.max_length_hit:
                 agg.num_correct_and_max_length_hit += 1
         else:
             agg.num_wrong += 1
             agg.wrong_length_sum += record.token_count
-    return pass_at_1
+    return native_metrics
 
 
 def _write_lcb_records_checkpoint(agg: WorkerAggregator, out_path: str) -> str:
@@ -776,6 +844,19 @@ def _write_lcb_records_checkpoint(agg: WorkerAggregator, out_path: str) -> str:
         json.dump(payload, handle, indent=2)
     print(f"Wrote LiveCodeBench records checkpoint to {checkpoint_path}", flush=True)
     return checkpoint_path
+
+
+def _prompt_token_summary(agg: WorkerAggregator) -> dict[str, float | int | None]:
+    avg_prompt_length = (
+        float(agg.prompt_length_sum) / float(agg.num_samples_seen)
+        if agg.num_samples_seen
+        else None
+    )
+    return {
+        "avg_prompt_token_count": avg_prompt_length,
+        "min_prompt_token_count": agg.prompt_length_min,
+        "max_prompt_token_count": agg.prompt_length_max,
+    }
 
 
 def main() -> None:
@@ -811,10 +892,10 @@ def main() -> None:
         loop_k=args.loop_k,
     )
     out_path = args.out or _derive_output_path(args)
-    lcb_pass_at_1: float | None = None
+    lcb_native_metrics: dict[str, float | None] = {}
     if args.task_kind == "livecodebench_codegen":
         _write_lcb_records_checkpoint(agg, out_path)
-        lcb_pass_at_1 = _apply_lcb_grades(
+        lcb_native_metrics = _apply_lcb_grades(
             agg,
             lcb_benchmark,
             repo_path=args.livecodebench_repo,
@@ -822,8 +903,6 @@ def main() -> None:
         )
 
     metrics = compute_metrics(agg, statistics)
-    if lcb_pass_at_1 is not None and "success_fraction" in metrics:
-        metrics["success_fraction"] = lcb_pass_at_1
 
     payload = {
         "metadata": {
@@ -833,10 +912,17 @@ def main() -> None:
             "task_kind": args.task_kind,
             "model_id": rollout_cfg.model_id,
             "generation_config": rollout_cfg.to_dict(),
+            "stats_contract_version": STATS_CONTRACT_VERSION,
             "seed": args.seed,
             "statistics": statistics,
             "loop_detector": {"n": args.loop_n, "k": args.loop_k},
+            "prompt_token_summary": _prompt_token_summary(agg),
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            **(
+                {"release_version": args.release_version}
+                if args.task_kind == "livecodebench_codegen"
+                else {}
+            ),
             **task_metadata,
         },
         "counts": {
@@ -854,8 +940,8 @@ def main() -> None:
         },
         "metrics": metrics,
     }
-    if lcb_pass_at_1 is not None:
-        payload["metadata"]["lcb_native_pass_at_1"] = lcb_pass_at_1
+    if lcb_native_metrics:
+        payload["metadata"]["lcb_native_metrics"] = lcb_native_metrics
 
     out_dir = os.path.dirname(out_path)
     if out_dir:

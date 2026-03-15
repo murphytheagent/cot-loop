@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from collections.abc import Sequence
 
 from datasets import load_dataset
 
-from ._common import load_local_rows, resolve_sample_id
+from ._common import (
+    extract_answer_letter_from_last_lines,
+    load_local_rows,
+    resolve_sample_id,
+)
 from ..types import DatasetSpec, SampleRecord
 
 MMLUPRO_LETTERS = tuple(chr(ord("A") + idx) for idx in range(10))
-_LETTER_PATTERN = re.compile(r"\b([A-J])\b")
 
 
 def _normalize_options(value: object, idx: int) -> list[str]:
@@ -96,14 +98,17 @@ def build_mcq_prompt(tokenizer, question: str, options: list[str]) -> str:
         raise ValueError(
             f"MMLU-Pro expects at most {len(MMLUPRO_LETTERS)} options, got {len(options)}."
         )
+    valid_letters = MMLUPRO_LETTERS[: len(options)]
     option_block = "\n".join(
         f"{letter}. {option}"
-        for letter, option in zip(MMLUPRO_LETTERS[: len(options)], options)
+        for letter, option in zip(valid_letters, options)
     )
     user_msg = (
         f"{question}\n\n"
         f"Answer choices:\n{option_block}\n\n"
-        "Respond with the single best answer letter."
+        "Think through the problem carefully if needed. "
+        "The final non-empty line must be exactly `Answer: X`, "
+        f"where X is one of {', '.join(valid_letters)}."
     )
     return tokenizer.apply_chat_template(
         [{"role": "user", "content": user_msg}],
@@ -117,15 +122,22 @@ def grade(
     gold_answer: str,
     gold_index: int | None,
 ) -> bool:
-    matches = _LETTER_PATTERN.findall(response.upper())
-    if not matches:
+    predicted = extract_answer_letter_from_last_lines(
+        response,
+        MMLUPRO_LETTERS,
+    )
+    if predicted is None:
         return False
-    predicted = matches[-1]
 
     gold_candidates = set()
     gold_answer = gold_answer.strip().upper()
     if gold_answer:
-        gold_candidates.add(gold_answer)
+        parsed_gold = extract_answer_letter_from_last_lines(
+            gold_answer,
+            MMLUPRO_LETTERS,
+            max_lines=1,
+        )
+        gold_candidates.add(parsed_gold or gold_answer)
     if gold_index is not None:
         if gold_index < 0 or gold_index >= len(MMLUPRO_LETTERS):
             raise ValueError(
