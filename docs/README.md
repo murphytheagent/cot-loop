@@ -1,6 +1,6 @@
 # Docs Index
 
-Last updated: 2026-04-06 09:45 UTC
+Last updated: 2026-04-09 01:40 UTC
 
 Purpose:
 - Store long-lived project documentation that is not part of the main README.
@@ -22,6 +22,7 @@ Core docs:
 - Prompt-profile combined April surface report: prompt-profile-full-surface-update-2026-04-04.md
 - OLMo degeneration-origin audit report: olmo-degeneration-origin-audit-2026-04-04.md
 - OLMo2 1B fifty-prompt rerun report: olmo2-1b-fifty-prompt-rerun-2026-04-05.md
+- OLMo and Qwen combined degeneration-origin report: olmo-qwen-degeneration-origin-combined-2026-04-09.md
 - Prompt-profile full-train result note: prompt-profile-full-train-results-2026-04-04.md
 - Prompt-profile binary retrain note: prompt-profile-binary-retrain-h256d2-2026-04-04.md
 - Prompt-profile binary capacity-controls note: prompt-profile-binary-capacity-controls-2026-04-04.md
@@ -58,6 +59,9 @@ Key outputs:
 - OLMo2 1B fifty-prompt rerun PDF: ../outputs/olmo2_1b_fifty_prompt_rerun_20260405/olmo2_1b_fifty_prompt_rerun_20260405.pdf
 - OLMo2 1B progression figure bundle: ../outputs/olmo2_1b_progression_bound50_20260406/
 - OLMo2 1B progression PDF: ../outputs/olmo2_1b_progression_bound50_20260406/olmo2_1b_progression_bound50.pdf
+- Qwen base raw finished summary bundle: ../outputs/qwen3_1p7b_base_raw_control_finished_20260409/
+- OLMo and Qwen combined bundle: ../outputs/olmo_qwen_degeneration_combined_20260409/
+- OLMo and Qwen combined PDF: ../outputs/olmo_qwen_degeneration_combined_20260409/olmo_qwen_degeneration_combined_20260409.pdf
 - Binary retrain result bundle: ../outputs/prompt_profile_binary_retrain_h256d2_20260404/
 - Binary retrain result PDF: ../outputs/prompt_profile_binary_retrain_h256d2_20260404/prompt_profile_binary_retrain_h256d2_20260404.pdf
 - Binary capacity-controls bundle: ../outputs/prompt_profile_binary_capacity_controls_20260404/
@@ -81,8 +85,8 @@ Current live status:
 - The note `prompt-profile-plain-language-2026-03-30.md` is the collaborator-facing explanation of the same correction in plain words.
 - The repo-root note `../understand-where-loop-and-max-length-come-from.md` is now the working degeneration-origin note on the older rollout-statistics module:
   - it now opens with a current status snapshot;
-  - it carries both the OLMo execution history and the active same-family Qwen base control;
-  - older April 4 pilot/debug sections are preserved in-place but explicitly marked `Historical`;
+  - it carries both the OLMo execution history and the finished same-family Qwen base control;
+  - older April 4 and April 6 live-checkpoint sections are preserved in-place but explicitly sit behind the now-finished Qwen surface;
   - use it when you want the full chronological path, not just the cleaned stage conclusion.
 - The docs note `understand-where-loop-and-max-length-come-from.md` is only the background definitions appendix for saved `loop`, prompt-profile `cap_hit` / `p_cap`, rollout-stat `max_length_hit`, and `majority_s_0.5`.
 - The new note `olmo-degeneration-origin-audit-2026-04-04.md` is the collaborator-facing OLMo audit surface for that thread:
@@ -96,15 +100,13 @@ Current live status:
 - The OLMo2 rerun now has the explicit visualization surface Wangzhi asked for:
   - the line-chart progression figures plus the within-stage Sankey/alluvial view live in `../outputs/olmo2_1b_progression_bound50_20260406/`
   - those figures are generated from the saved stage JSONs, not copied by hand from Slack tables.
-- The next same-family control is now the Qwen base raw rerun on the old v2 rollout surface:
+- The Qwen same-family control is now a finished five-dataset object rather than one durable row plus liveness receipts:
   - the reference object is still `../outputs/qwen3_1p7b_rollout_stats_v2_temp0p2_gen10/`
-  - the base checkpoint has to run at `32768`, not `40960`, because `Qwen/Qwen3-1.7B-Base` advertises the shorter limit and vLLM rejects the instruct horizon without an unsafe override
+  - the base checkpoint still has to run at `32768`, not `40960`, because `Qwen/Qwen3-1.7B-Base` advertises the shorter limit and vLLM rejects the instruct horizon without an unsafe override
   - the old Qwen v2 `LiveCodeBench` row used raw strings from LiveCodeBench's `format_prompt_generation` under `CodeQwenInstruct`; the base control uses `GenericBase`, so that row is same dataset / sampler rather than a literal same-LM-style replay
-  - the tiny base `LiveCodeBench` style probe now shows that this wrapper caveat is real but not sufficient to explain the weak base `LiveCodeBench` probe behavior by itself: both `GenericBase` and `CodeQwenInstruct` looped to the cap on the same `2` prompts with `pass@1 = 0`, though `GenericBase` drifts into repeated problem text while `CodeQwenInstruct` collapses into repeated `# YOUR CODE HERE`
-  - the saved text probe already shows that Qwen base raw degenerates on MCQ mainly by repeating the answer-format instruction tail, which is a different failure mode from the OLMo2 base math loops
-  - the first finished base row is now on disk: `MATH-500 243/500 correct`, `19/500` looped, `22/500` max-length-hit, with every looped rollout also hitting max length
-  - that base `MATH-500` row is already worse than the old instruct v2 `MATH-500` reference on both loop rate (`0.038` vs `0.0294`) and max-length-hit rate (`0.044` vs `0.0146`), even though the base row is much shorter on average (`1893.6` vs `6227.6`)
-  - only `MATH-500` is complete so far; the latest Qwen base-control checkpoint lives in `roadmap.md` until this follow-up gets its own finished note
+  - the tiny base `LiveCodeBench` style probe still says that wrapper caveat is real but not sufficient to explain the weak base `LiveCodeBench` behavior by itself: both `GenericBase` and `CodeQwenInstruct` looped to the cap on the same `2` prompts with `pass@1 = 0`
+  - the finished base rows are now all on disk and summarized in `olmo-qwen-degeneration-origin-combined-2026-04-09.md`
+  - base raw is worse than the saved instruct reference on loop fraction and max-length-hit fraction for all five datasets, which makes the base/raw pathology a cross-family phenomenon rather than an OLMo-only artifact
 - The locked pair now has both the execution note and the finished first-run result note on disk.
 - The older `h256 d2` binary retrain note is still on disk, but it is now intermediate only:
   - it preserves the exact `2106` / `2107` depth-rerun record and raw remote metrics
